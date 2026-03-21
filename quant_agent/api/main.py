@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from quant_agent.api.runtime_service import DashboardRuntimeService
@@ -41,6 +41,26 @@ async def get_markets() -> list[dict]:
 @app.get("/api/signals")
 async def get_signals() -> list[dict]:
     return await service.get_signals()
+
+
+@app.post("/api/signals/{signal_id}/approve")
+async def approve_signal(signal_id: str) -> dict:
+    try:
+        return await service.approve_signal(signal_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/signals/{signal_id}/reject")
+async def reject_signal(signal_id: str) -> dict:
+    try:
+        return await service.reject_signal(signal_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/api/agents")

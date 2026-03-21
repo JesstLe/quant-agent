@@ -13,6 +13,126 @@ export interface Market {
   low24h: number
   open: number
   previousClose: number
+  pe?: number
+  pb?: number
+  turnoverRate?: number
+  amplitude?: number
+  high52w?: number
+  low52w?: number
+  marketCap?: number
+}
+
+// ============================================================
+// OHLCV & Chart Types
+// ============================================================
+
+export type ChartInterval = '1m' | '5m' | '15m' | '30m' | '60m' | '1d' | '1w' | '1M'
+
+export interface OHLCV {
+  time: string | number
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
+export interface IntradayPoint {
+  time: string
+  price: number
+  volume: number
+  avgPrice: number
+}
+
+export interface DepthLevel {
+  price: number
+  quantity: number
+  total?: number
+}
+
+export interface MarketDepth {
+  symbol: string
+  bids: DepthLevel[]
+  asks: DepthLevel[]
+  timestamp: Date | string
+}
+
+export interface Tick {
+  id: string
+  symbol: string
+  price: number
+  quantity: number
+  side: 'BUY' | 'SELL'
+  timestamp: Date | string
+}
+
+// ============================================================
+// Technical Indicator Types
+// ============================================================
+
+export type IndicatorType = 'MA' | 'EMA' | 'BOLL' | 'RSI' | 'MACD' | 'KDJ' | 'VOL'
+
+export interface IndicatorConfig {
+  type: IndicatorType
+  params: number[]
+  visible: boolean
+}
+
+export interface MACDData {
+  time: string | number
+  macd: number
+  signal: number
+  histogram: number
+}
+
+export interface RSIData {
+  time: string | number
+  value: number
+}
+
+// ============================================================
+// News & Alert Types
+// ============================================================
+
+export interface NewsItem {
+  id: string
+  title: string
+  summary?: string
+  source: string
+  url?: string
+  sentiment: 'positive' | 'negative' | 'neutral'
+  sentimentScore: number
+  relatedSymbols: string[]
+  timestamp: Date | string
+}
+
+export interface PriceAlert {
+  id: string
+  symbol: string
+  condition: 'above' | 'below'
+  targetPrice: number
+  currentPrice: number
+  triggered: boolean
+  createdAt: Date | string
+  triggeredAt?: Date | string
+}
+
+// ============================================================
+// Watchlist Types
+// ============================================================
+
+export interface WatchlistItem {
+  symbol: string
+  addedAt: Date | string
+  notes?: string
+  tags?: string[]
+}
+
+export interface Watchlist {
+  id: string
+  name: string
+  items: WatchlistItem[]
+  createdAt: Date | string
 }
 
 // ============================================================

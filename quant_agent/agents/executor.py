@@ -93,6 +93,29 @@ class Order:
             "broker_order_id": self.broker_order_id,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Order":
+        return cls(
+            order_id=str(data["order_id"]),
+            symbol=str(data["symbol"]),
+            side=str(data["side"]),
+            quantity=float(data["quantity"]),
+            order_type=OrderType(str(data.get("order_type", OrderType.LIMIT.value))),
+            limit_price=_optional_float(data.get("limit_price")),
+            stop_price=_optional_float(data.get("stop_price")),
+            status=OrderStatus(str(data.get("status", OrderStatus.PENDING.value))),
+            time_in_force=TimeInForce(str(data.get("time_in_force", TimeInForce.DAY.value))),
+            filled_quantity=float(data.get("filled_quantity", 0.0)),
+            avg_fill_price=_optional_float(data.get("avg_fill_price")),
+            commission=float(data.get("commission", 0.0)),
+            slippage=float(data.get("slippage", 0.0)),
+            created_at=str(data.get("created_at", datetime.now().isoformat())),
+            updated_at=str(data.get("updated_at", datetime.now().isoformat())),
+            filled_at=data.get("filled_at"),
+            broker_order_id=data.get("broker_order_id"),
+            metadata=dict(data.get("metadata", {})),
+        )
+
 
 @dataclass
 class ExecutionResult:
@@ -565,3 +588,37 @@ Provide:
             return "acceptable"
         else:
             return "poor"
+
+    def export_state(self) -> dict[str, Any]:
+        """Export executor state for persistence."""
+        return {
+            "orders": [order.to_dict() for order in self._orders.values()],
+            "execution_stats": dict(self._execution_stats),
+        }
+
+    def restore_state(self, state: dict[str, Any]) -> None:
+        """Restore executor state from persisted data."""
+        restored_orders = [Order.from_dict(payload) for payload in state.get("orders", [])]
+        self._orders = {order.order_id: order for order in restored_orders}
+        self._execution_stats = {
+            "total_orders": 0,
+            "filled_orders": 0,
+            "cancelled_orders": 0,
+            "total_volume": 0.0,
+            "total_commission": 0.0,
+            "total_slippage_bps": 0.0,
+            **state.get("execution_stats", {}),
+        }
+        self._positions = {}
+        for order in restored_orders:
+            if order.status == OrderStatus.FILLED:
+                self._update_position(order)
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

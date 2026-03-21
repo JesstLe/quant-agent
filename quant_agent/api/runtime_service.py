@@ -6,6 +6,7 @@ import asyncio
 from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+import hashlib
 from typing import Any
 
 import yfinance as yf
@@ -16,6 +17,7 @@ from quant_agent.agents.researcher import ResearcherAgent
 from quant_agent.agents.risk_manager import RiskManagerAgent
 from quant_agent.agents.strategist import SignalType, StrategistAgent
 from quant_agent.api.demo_service import DashboardDemoService
+from quant_agent.api.persistence import RuntimeStateStore
 from quant_agent.backtest.engine import BacktestEngine
 from quant_agent.core.llm import get_llm
 from quant_agent.core.memory import AgentMemory
@@ -49,6 +51,7 @@ class DashboardRuntimeService:
         strategy: str = "momentum",
         capital: float = 100_000.0,
         refresh_interval_seconds: int = 120,
+        state_store: RuntimeStateStore | None = None,
     ) -> None:
         self.symbols = symbols or ["AAPL", "MSFT", "GOOGL", "NVDA", "AMZN", "TSLA"]
         self.strategy = strategy
@@ -63,13 +66,16 @@ class DashboardRuntimeService:
         self._risk_manager = RiskManagerAgent(self._llm, self._memory)
         self._executor = ExecutorAgent(self._llm, self._memory)
         self._fallback = DashboardDemoService()
+        self._state_store = state_store or RuntimeStateStore()
 
         self._logs: deque[dict[str, Any]] = deque(maxlen=100)
         self._snapshot: dict[str, Any] = self._fallback.snapshot()
+        self._signal_overrides: dict[str, dict[str, Any]] = {}
         self._last_refresh: datetime | None = None
         self._lock = asyncio.Lock()
 
         self._set_context()
+        self._restore_state()
 
     async def get_snapshot(self, force_refresh: bool = False) -> dict[str, Any]:
         await self._ensure_fresh(force_refresh=force_refresh)
@@ -105,6 +111,12 @@ class DashboardRuntimeService:
     async def get_daily_history(self) -> list[dict[str, Any]]:
         return (await self.get_snapshot())["dailyHistory"]
 
+    async def approve_signal(self, signal_id: str) -> dict[str, Any]:
+        return await self._update_signal_status(signal_id, "APPROVED")
+
+    async def reject_signal(self, signal_id: str) -> dict[str, Any]:
+        return await self._update_signal_status(signal_id, "REJECTED")
+
     async def _ensure_fresh(self, force_refresh: bool = False) -> None:
         if not force_refresh and self._last_refresh is not None:
             age = (datetime.now(UTC) - self._last_refresh).total_seconds()
@@ -120,6 +132,7 @@ class DashboardRuntimeService:
 
     async def _refresh_snapshot(self) -> None:
         now = datetime.now(UTC)
+        self._last_refresh = now
         self._set_context()
 
         try:
@@ -158,6 +171,7 @@ class DashboardRuntimeService:
                 "historicalData": historical_data,
                 "dailyHistory": daily_history,
             }
+            self._persist_state()
         except Exception as exc:
             self._append_log(
                 agent_id="agent-system",
@@ -169,15 +183,13 @@ class DashboardRuntimeService:
             fallback = self._fallback.snapshot()
             fallback["logs"] = list(self._logs) or fallback["logs"]
             self._snapshot = fallback
-
-        self._last_refresh = now
+            self._persist_state()
 
     async def _process_signals(
         self,
         raw_signals: list[dict[str, Any]],
         markets: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        held_symbols = {position.symbol for position in self._build_positions(markets)[0]}
         processed: list[dict[str, Any]] = []
         market_lookup = {market["symbol"]: market for market in markets}
 
@@ -188,31 +200,16 @@ class DashboardRuntimeService:
                 current_price=signal.get("entry_price"),
             )
             signal_type = str(signal.get("signal_type", "hold")).upper()
-            status = "APPROVED" if assessment.get("approved") else "REJECTED"
+            status = "PENDING" if assessment.get("approved") else "REJECTED"
+            signal_id = self._signal_id(signal)
             execution_details = None
 
-            if assessment.get("approved") and signal_type == "BUY" and signal["symbol"] not in held_symbols:
-                execution = await self._executor.execute("place_order", signal=signal)
-                execution_details = execution.get("execution", {})
-                if execution.get("success") and execution_details.get("status") == OrderStatus.FILLED.value:
-                    status = "EXECUTED"
-                    held_symbols.add(signal["symbol"])
-                    order = execution["order"]
-                    fill_price = order.get("avg_fill_price") or order.get("limit_price") or signal.get("entry_price", 0)
-                    position_value = float(order.get("filled_quantity", 0) or 0) * float(fill_price or 0)
-                    self._risk_manager.update_position(signal["symbol"], position_value)
-                    self._append_log(
-                        agent_id="agent-executor",
-                        agent_name="Executor",
-                        level="success",
-                        message=f"Filled {signal['symbol']} order at ${fill_price:.2f}",
-                        details=execution,
-                    )
-                else:
-                    status = "EXECUTING" if execution.get("success") else "REJECTED"
+            override = self._signal_overrides.get(signal_id)
+            if override:
+                status = str(override.get("status", status))
 
             api_signal = {
-                "id": f"sig-{index + 1:03d}",
+                "id": signal_id,
                 "symbol": signal["symbol"],
                 "type": signal_type,
                 "confidence": round(float(signal.get("confidence", 0.0)), 2),
@@ -642,6 +639,153 @@ class DashboardRuntimeService:
             }
         )
 
+    async def _update_signal_status(self, signal_id: str, target_status: str) -> dict[str, Any]:
+        await self._ensure_fresh()
+
+        async with self._lock:
+            signal = next(
+                (item for item in self._snapshot.get("signals", []) if item.get("id") == signal_id),
+                None,
+            )
+            if signal is None:
+                raise KeyError(f"Signal {signal_id} was not found")
+
+            current_status = str(signal.get("status", "PENDING"))
+            if current_status == target_status:
+                return signal
+
+            if current_status in {"EXECUTED", "REJECTED", "CANCELLED"}:
+                raise ValueError(f"Signal in status {current_status} cannot be updated")
+
+            now = datetime.now(UTC)
+            next_status = target_status
+            execution_details: dict[str, Any] | None = None
+
+            if target_status == "APPROVED" and str(signal.get("type")) in {"BUY", "SELL"}:
+                execution = await self._executor.execute(
+                    "place_order",
+                    signal=self._executor_signal_payload(signal),
+                    quantity=float(signal.get("quantity") or 0.0) or None,
+                )
+                execution_details = execution
+                execution_status = execution.get("execution", {}).get("status")
+
+                if execution.get("success") and execution_status == OrderStatus.FILLED.value:
+                    next_status = "EXECUTED"
+                    order = execution.get("order", {})
+                    filled_quantity = float(order.get("filled_quantity") or order.get("quantity") or 0.0)
+                    fill_price = float(
+                        order.get("avg_fill_price")
+                        or order.get("limit_price")
+                        or signal.get("entryPrice")
+                        or 0.0
+                    )
+                    position_value = filled_quantity * fill_price
+                    if str(order.get("side", "")).lower() == "buy":
+                        self._risk_manager.update_position(str(signal.get("symbol")), position_value)
+                    else:
+                        self._risk_manager.update_position(str(signal.get("symbol")), 0.0)
+
+                    self._append_log(
+                        agent_id="agent-executor",
+                        agent_name="Executor",
+                        level="success",
+                        message=f"Executed {signal['symbol']} {signal['type']} order at ${fill_price:.2f}",
+                        details=execution,
+                        timestamp=now,
+                    )
+                else:
+                    next_status = "APPROVED"
+
+            signal["status"] = next_status
+            signal["timestamp"] = _iso(now)
+            self._signal_overrides[signal_id] = {
+                "status": next_status,
+                "updatedAt": _iso(now),
+            }
+
+            action_label = "approved" if target_status == "APPROVED" else "rejected"
+            self._append_log(
+                agent_id="agent-system",
+                agent_name="System",
+                level="success" if target_status == "APPROVED" else "warning",
+                message=f"{action_label.capitalize()} signal for {signal['symbol']}",
+                details={
+                    "signalId": signal_id,
+                    "previousStatus": current_status,
+                    "status": next_status,
+                    "execution": execution_details,
+                },
+                timestamp=now,
+            )
+
+            await self._rebuild_snapshot_views(now=now)
+            self._persist_state()
+            updated_signal = next(
+                (item for item in self._snapshot.get("signals", []) if item.get("id") == signal_id),
+                signal,
+            )
+            return updated_signal
+
+    async def _rebuild_snapshot_views(self, now: datetime | None = None) -> None:
+        current_time = now or datetime.now(UTC)
+        markets = list(self._snapshot.get("markets", []))
+        signals = list(self._snapshot.get("signals", []))
+        positions, cash_balance = self._build_positions(markets)
+        historical_data = list(self._snapshot.get("historicalData", [])) or await asyncio.to_thread(
+            self._build_historical_data
+        )
+        risk = await self._build_risk(positions, historical_data)
+        alerts = self._build_alerts(positions, risk)
+        daily_history = await asyncio.to_thread(self._build_daily_history, positions)
+        portfolio = self._build_portfolio(positions, cash_balance, historical_data)
+        trades = self._build_trades()
+        agents = self._build_agents(current_time, len(signals))
+
+        self._snapshot.update(
+            {
+                "portfolio": portfolio,
+                "signals": signals,
+                "agents": agents,
+                "trades": trades,
+                "risk": risk,
+                "alerts": alerts,
+                "logs": list(self._logs),
+                "historicalData": historical_data,
+                "dailyHistory": daily_history,
+            }
+        )
+
+    @staticmethod
+    def _signal_id(signal: dict[str, Any]) -> str:
+        fingerprint = "|".join(
+            [
+                str(signal.get("symbol", "")),
+                str(signal.get("signal_type", signal.get("type", ""))).upper(),
+                f"{float(signal.get('entry_price', signal.get('entryPrice', 0.0)) or 0.0):.4f}",
+                f"{float(signal.get('target_price', signal.get('targetPrice', 0.0)) or 0.0):.4f}",
+                f"{float(signal.get('stop_loss', signal.get('stopLoss', 0.0)) or 0.0):.4f}",
+            ]
+        )
+        digest = hashlib.sha1(fingerprint.encode("utf-8")).hexdigest()[:10]
+        return f"sig-{digest}"
+
+    @staticmethod
+    def _executor_signal_payload(signal: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "symbol": signal.get("symbol"),
+            "signal_type": str(signal.get("type", "HOLD")).lower(),
+            "confidence": float(signal.get("confidence", 0.0) or 0.0),
+            "entry_price": float(signal.get("entryPrice", 0.0) or 0.0),
+            "target_price": float(signal.get("targetPrice", 0.0) or 0.0),
+            "stop_loss": float(signal.get("stopLoss", 0.0) or 0.0),
+            "rationale": signal.get("rationale", ""),
+            "timeframe": "medium",
+            "risk_reward_ratio": 2.0,
+            "position_size_pct": 0.0,
+            "metadata": {"source": "dashboard-approval"},
+        }
+
     def _set_context(self) -> None:
         context = AgentContext(
             symbols=self.symbols,
@@ -652,3 +796,38 @@ class DashboardRuntimeService:
         )
         for agent in (self._researcher, self._strategist, self._risk_manager, self._executor):
             agent.set_context(context)
+
+    def _persist_state(self) -> None:
+        self._state_store.save_many(
+            {
+                "snapshot": self._snapshot,
+                "logs": list(self._logs),
+                "executor_state": self._executor.export_state(),
+                "signal_overrides": self._signal_overrides,
+                "last_refresh": self._last_refresh.isoformat() if self._last_refresh else None,
+            }
+        )
+
+    def _restore_state(self) -> None:
+        snapshot = self._state_store.load("snapshot")
+        if isinstance(snapshot, dict):
+            self._snapshot = snapshot
+
+        logs = self._state_store.load("logs", [])
+        if isinstance(logs, list):
+            self._logs = deque(logs, maxlen=100)
+
+        executor_state = self._state_store.load("executor_state", {})
+        if isinstance(executor_state, dict):
+            self._executor.restore_state(executor_state)
+
+        signal_overrides = self._state_store.load("signal_overrides", {})
+        if isinstance(signal_overrides, dict):
+            self._signal_overrides = signal_overrides
+
+        last_refresh = self._state_store.load("last_refresh")
+        if isinstance(last_refresh, str):
+            try:
+                self._last_refresh = datetime.fromisoformat(last_refresh)
+            except ValueError:
+                self._last_refresh = None

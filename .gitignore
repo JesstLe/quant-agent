@@ -43,3 +43,6 @@ frontend/.vite/
 data/
 *.db
 *.db-journal
+
+.factory/
+.trae/

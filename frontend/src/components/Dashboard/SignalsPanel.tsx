@@ -25,8 +25,23 @@ const confidenceColor = (confidence: number): string => {
 }
 
 export function SignalsPanel() {
-  const { signals, isLoading } = useApp()
+  const { signals, isLoading, reviewSignal } = useApp()
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [pendingActionId, setPendingActionId] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  const handleReview = async (signalId: string, action: 'approve' | 'reject') => {
+    setPendingActionId(signalId)
+    setActionError(null)
+
+    try {
+      await reviewSignal(signalId, action)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to update signal')
+    } finally {
+      setPendingActionId(null)
+    }
+  }
 
   if (isLoading) {
     return (
@@ -59,6 +74,11 @@ export function SignalsPanel() {
           {signals.filter(s => s.status === 'PENDING').length} pending
         </span>
       </div>
+      {actionError && (
+        <div className="px-4 py-2 border-b border-dark-border bg-loss/10 text-xs text-loss">
+          {actionError}
+        </div>
+      )}
       <div className="p-4 space-y-3 max-h-[500px] overflow-y-auto">
         {signals.map((signal) => {
           const isExpanded = expandedId === signal.id
@@ -165,11 +185,25 @@ export function SignalsPanel() {
                       </span>
                       {signal.status === 'PENDING' && (
                         <div className="flex gap-2">
-                          <button className="px-3 py-1 text-xs bg-loss/20 text-loss rounded hover:bg-loss/30 transition-colors">
+                          <button
+                            className="px-3 py-1 text-xs bg-loss/20 text-loss rounded hover:bg-loss/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={pendingActionId === signal.id}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              void handleReview(signal.id, 'reject')
+                            }}
+                          >
                             Reject
                           </button>
-                          <button className="px-3 py-1 text-xs bg-profit/20 text-profit rounded hover:bg-profit/30 transition-colors">
-                            Approve
+                          <button
+                            className="px-3 py-1 text-xs bg-profit/20 text-profit rounded hover:bg-profit/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={pendingActionId === signal.id}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              void handleReview(signal.id, 'approve')
+                            }}
+                          >
+                            {pendingActionId === signal.id ? 'Working...' : 'Approve'}
                           </button>
                         </div>
                       )}

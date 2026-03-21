@@ -51,6 +51,7 @@ interface AppContextType {
   refresh: () => Promise<void>
   setUseMockData: (value: boolean) => void
   acknowledgeAlert: (alertId: string) => void
+  reviewSignal: (signalId: string, action: 'approve' | 'reject') => Promise<void>
 }
 
 const AppContext = createContext<AppContextType | null>(null)
@@ -221,6 +222,25 @@ export function AppProvider({ children, initialMockMode = true }: AppProviderPro
     setUseMockDataState(value)
   }, [])
 
+  const reviewSignal = useCallback(async (signalId: string, action: 'approve' | 'reject') => {
+    if (useMockData) {
+      const nextStatus = action === 'approve' ? 'APPROVED' : 'REJECTED'
+      setSignals(prev => prev.map(signal => (
+        signal.id === signalId ? { ...signal, status: nextStatus } : signal
+      )))
+      setLastUpdate(new Date())
+      return
+    }
+
+    const endpoint = `/api/signals/${signalId}/${action}`
+    const updatedSignal = await api.post<Signal>(endpoint, {})
+
+    setSignals(prev => prev.map(signal => (
+      signal.id === signalId ? updatedSignal : signal
+    )))
+    await loadRealData()
+  }, [useMockData, loadRealData])
+
   // Acknowledge alert
   const acknowledgeAlert = useCallback((alertId: string) => {
     setAlerts(prev => prev.map(a => a.id === alertId ? { ...a, acknowledged: true } : a))
@@ -249,22 +269,30 @@ export function AppProvider({ children, initialMockMode = true }: AppProviderPro
           setMarkets(typedData.payload as Market[])
           break
         case 'signals':
-          setSignals(prev => [typedData.payload as Signal, ...prev])
+          setSignals(Array.isArray(typedData.payload)
+            ? typedData.payload as Signal[]
+            : prev => [typedData.payload as Signal, ...prev])
           break
         case 'agents':
           setAgents(typedData.payload as Agent[])
           break
         case 'trades':
-          setTrades(prev => [typedData.payload as Trade, ...prev])
+          setTrades(Array.isArray(typedData.payload)
+            ? typedData.payload as Trade[]
+            : prev => [typedData.payload as Trade, ...prev])
           break
         case 'risk':
           setRiskMetrics(typedData.payload as RiskMetrics)
           break
         case 'alerts':
-          setAlerts(prev => [typedData.payload as RiskAlert, ...prev])
+          setAlerts(Array.isArray(typedData.payload)
+            ? typedData.payload as RiskAlert[]
+            : prev => [typedData.payload as RiskAlert, ...prev])
           break
         case 'logs':
-          setLogs(prev => [typedData.payload as AgentLog, ...prev.slice(0, 99)])
+          setLogs(Array.isArray(typedData.payload)
+            ? typedData.payload as AgentLog[]
+            : prev => [typedData.payload as AgentLog, ...prev.slice(0, 99)])
           break
       }
       setLastUpdate(new Date())
@@ -313,6 +341,7 @@ export function AppProvider({ children, initialMockMode = true }: AppProviderPro
     refresh,
     setUseMockData,
     acknowledgeAlert,
+    reviewSignal,
   }
 
   return (
