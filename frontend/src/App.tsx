@@ -2,8 +2,10 @@ import { AppProvider, useApp } from './hooks/useApp'
 import { PortfolioSummary, PositionsTable, SignalsPanel, AgentsPanel, MarketsTable } from './components/Dashboard'
 import { PortfolioChart, AllocationPieChart, DailyPnlChart } from './components/Dashboard/Charts'
 
+export type MarketType = 'A' | 'US'
+
 function Header() {
-  const { refresh, isLoading, useMockData, setUseMockData, lastUpdate } = useApp()
+  const { refresh, isLoading, marketType, setMarketType, lastUpdate } = useApp()
 
   return (
     <header className="bg-dark-card border-b border-dark-border">
@@ -16,25 +18,35 @@ function Header() {
               </svg>
               <h1 className="text-lg font-bold text-dark-text">QuantAgent</h1>
             </div>
-            <span className={`px-2 py-0.5 rounded text-xs font-medium ${useMockData ? 'bg-warning/20 text-warning' : 'bg-profit/20 text-profit'}`}>
-              {useMockData ? 'Demo Mode' : 'Live'}
+            <span className={`px-2 py-0.5 rounded text-xs font-medium ${marketType === 'A' ? 'bg-info/20 text-info' : 'bg-purple-500/20 text-purple-400'}`}>
+              {marketType === 'A' ? 'A股' : '美股'}
             </span>
           </div>
 
           <div className="flex items-center gap-4">
-            {/* Demo/Live Toggle */}
-            <label className="flex items-center gap-2 cursor-pointer">
-              <span className="text-xs text-dark-muted">Demo</span>
+            {/* Market Type Toggle */}
+            <div className="flex items-center gap-1 bg-dark-hover rounded-lg p-1">
               <button
-                onClick={() => setUseMockData(!useMockData)}
-                className={`relative w-10 h-5 rounded-full transition-colors ${useMockData ? 'bg-warning/30' : 'bg-profit/30'}`}
+                onClick={() => setMarketType('A')}
+                className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                  marketType === 'A'
+                    ? 'bg-info/20 text-info'
+                    : 'text-dark-muted hover:text-dark-text'
+                }`}
               >
-                <span
-                  className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full transition-transform ${useMockData ? 'translate-x-0 bg-warning' : 'translate-x-5 bg-profit'}`}
-                />
+                A股
               </button>
-              <span className="text-xs text-dark-muted">Live</span>
-            </label>
+              <button
+                onClick={() => setMarketType('US')}
+                className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                  marketType === 'US'
+                    ? 'bg-purple-500/20 text-purple-400'
+                    : 'text-dark-muted hover:text-dark-text'
+                }`}
+              >
+                美股
+              </button>
+            </div>
 
             {/* Refresh Button */}
             <button
@@ -45,13 +57,13 @@ function Header() {
               <svg className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.58M20 20v-5h-.58M4.58 9A8 8 0 0119.42 9M19.42 15A8 8 0 014.58 15" />
               </svg>
-              {isLoading ? 'Refreshing...' : 'Refresh'}
+              {isLoading ? '刷新中...' : '刷新'}
             </button>
 
             {/* Last Update */}
             {lastUpdate && (
               <div className="text-xs text-dark-muted">
-                Updated: {lastUpdate.toLocaleTimeString()}
+                更新时间: {lastUpdate.toLocaleTimeString()}
               </div>
             )}
           </div>
@@ -132,7 +144,7 @@ function MainContent() {
 
 export default function App() {
   return (
-    <AppProvider initialMockMode={true}>
+    <AppProvider initialMarketType="US">
       <div className="min-h-screen bg-dark-bg">
         <Header />
         <MainContent />
