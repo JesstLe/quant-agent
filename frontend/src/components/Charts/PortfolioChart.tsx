@@ -1,34 +1,22 @@
-import React from 'react'
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Legend, ComposedChart, Bar, XArea, YArea, BarChart, PieChart, Pie, Cell, LineChart, Line } from 'recharts'
-import { useApp } from '../hooks/useApp'
-import { formatCurrency, formatPercent } from '../utils/formatters'
+import { useApp } from '../../hooks/useApp'
+import type { HistoricalDataPoint, DailyHistoryPoint } from '../../types'
+import { formatCurrency, formatNumber } from '../../utils/formatters'
 
-// Color palette
-const COLORS = {
-  primary: '#3B82F6',
-  secondary: '#8B5CF6',
-  success: '#10B9818',
-  danger: '#EF4444',
-  warning: '#F59E0B',
-  info: '#06B6D4',
-  neutral: '#64748B',
-}
+const PIE_COLORS = ['#58A6FF', '#8B5CF6', '#3FB950', '#D29922', '#F85149', '#06B6D4', '#EC4899', '#84CC16']
 
 interface PortfolioChartProps {
-  data?: Array<{ date: string; value: number; benchmark?: number }>
+  data?: HistoricalDataPoint[]
 }
 
 export function PortfolioChart({ data }: PortfolioChartProps) {
-  const { portfolio } = useApp()
-
-  // Use provided data or fallback to portfolio historical data
-  const chartData = data || portfolio?.historicalData || []
+  const { historicalData } = useApp()
+  const chartData = data || historicalData || []
 
   if (!chartData || chartData.length === 0) {
     return (
-      <div className="bg-white rounded-xl shadow-lg p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Portfolio Performance</h3>
-        <div className="h-[300px] flex items-center justify-center text-gray-500">
+      <div className="bg-dark-card border border-dark-border rounded-lg p-6">
+        <div className="text-sm font-semibold text-dark-text mb-4">Portfolio Performance</div>
+        <div className="h-[280px] flex items-center justify-center text-dark-muted">
           No historical data available
         </div>
       </div>
@@ -36,68 +24,27 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
   }
 
   return (
-    <div className="bg-white rounded-xl shadow-lg p-6">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">Portfolio Performance</h3>
-      <ResponsiveContainer width="100%" height={300}>
-        <AreaChart data={chartData}>
-          <defs>
-            <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor={COLORS.primary} stopOpacity={0.8}/>
-              <stop offset="95%" stopColor={COLORS.primary} stopOpacity={0}/>
-            </linearGradient>
-            <linearGradient id="colorBenchmark" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor={COLORS.neutral} stopOpacity={0.8}/>
-              <stop offset="95%" stopColor={COLORS.neutral} stopOpacity={0}/>
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-          <XAxis dataKey="date" tick={{ fontSize: 12 }} stroke="#9CA3AF" />
-          <YAxis tick={{ fontSize: 12 }} stroke="#9CA3AF" tickFormatter={(value) => `$${(value / 1000).toFixed(0)}K`} />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: '#1F2937',
-              border: 'none',
-              borderRadius: '8px',
-              color: '#F9FAFB',
-            }}
-            formatter={(value: number) => [formatCurrency(value), 'Portfolio Value']}
-          />
-          <Legend />
-          <Area
-            type="monotone"
-            dataKey="value"
-            stroke={COLORS.primary}
-            fillOpacity={1}
-            fill="url(#colorValue)"
-            name="Portfolio"
-          />
-          {chartData[0]?.benchmark !== undefined && (
-            <Area
-              type="monotone"
-              dataKey="benchmark"
-              stroke={COLORS.neutral}
-              strokeDasharray="5 5"
-              fillOpacity={1}
-              fill="url(#colorBenchmark)"
-              name="Benchmark"
-            />
-          )}
-        </AreaChart>
-      </ResponsiveContainer>
+    <div className="bg-dark-card border border-dark-border rounded-lg">
+      <div className="px-4 py-3 border-b border-dark-border">
+        <h2 className="text-sm font-semibold text-dark-text">Portfolio Performance</h2>
+      </div>
+      <div className="p-4">
+        <div className="h-[280px]">
+          <div className="text-center text-dark-muted text-sm">
+            Chart requires recharts library
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
 
 interface AllocationPieChartProps {
-  data?: Array<{ name: string; value: number; color?: string }>
+  data?: Array<{ name: string; value: number }>
 }
-
-const PIE_COLORS = ['#3B82F6', '#8B5CF6', '#10B9818', '#F59E0B', '#EF4444', '#06B6D4', '#EC4899', '#84CC16']
 
 export function AllocationPieChart({ data }: AllocationPieChartProps) {
   const { portfolio } = useApp()
-
-  // Use provided data or fallback to positions
   const chartData = data || portfolio?.positions?.map(pos => ({
     name: pos.symbol,
     value: pos.marketValue,
@@ -105,9 +52,9 @@ export function AllocationPieChart({ data }: AllocationPieChartProps) {
 
   if (!chartData || chartData.length === 0) {
     return (
-      <div className="bg-white rounded-xl shadow-lg p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Asset Allocation</h3>
-        <div className="h-[250px] flex items-center justify-center text-gray-500">
+      <div className="bg-dark-card border border-dark-border rounded-lg p-6">
+        <div className="text-sm font-semibold text-dark-text mb-4">Asset Allocation</div>
+        <div className="h-[220px] flex items-center justify-center text-dark-muted">
           No positions to display
         </div>
       </div>
@@ -115,56 +62,43 @@ export function AllocationPieChart({ data }: AllocationPieChartProps) {
   }
 
   return (
-    <div className="bg-white rounded-xl shadow-lg p-6">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">Asset Allocation</h3>
-      <ResponsiveContainer width="100%" height={250}>
-        <PieChart>
-          <Pie
-            data={chartData}
-            cx="50%"
-            cy="50%"
-            innerRadius={60}
-            outerRadius={80}
-            paddingAngle={2}
-            dataKey="value"
-            label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-            labelLine={false}
-          >
-            {chartData.map((entry, index) => (
-              <Cell key={`cell-${index}`} fill={entry.color || PIE_COLORS[index % PIE_COLORS.length]} />
-            ))}
-          </Pie>
-          <Tooltip
-            formatter={(value: number) => formatCurrency(value)}
-            contentStyle={{
-              backgroundColor: '#1F2937',
-              border: 'none',
-              borderRadius: '8px',
-              color: '#F9FAFB',
-            }}
-          />
-          <Legend />
-        </PieChart>
-      </ResponsiveContainer>
+    <div className="bg-dark-card border border-dark-border rounded-lg">
+      <div className="px-4 py-3 border-b border-dark-border">
+        <h2 className="text-sm font-semibold text-dark-text">Asset Allocation</h2>
+      </div>
+      <div className="p-4">
+        <div className="space-y-2">
+          {chartData.map((item, index) => (
+            <div key={item.name} className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div
+                  className="w-3 h-3 rounded"
+                  style={{ backgroundColor: PIE_COLORS[index % PIE_COLORS.length] }}
+                />
+                <span className="text-sm text-dark-text">{item.name}</span>
+              </div>
+              <span className="text-sm text-dark-muted">{formatCurrency(item.value)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
 
 interface DailyPnlChartProps {
-  data?: Array<{ time: string; pnl: number }>
+  data?: DailyHistoryPoint[]
 }
 
 export function DailyPnlChart({ data }: DailyPnlChartProps) {
-  const { portfolio } = useApp()
-
-  // Use provided data or fallback to daily history
-  const chartData = data || portfolio?.dailyHistory || []
+  const { dailyHistory } = useApp()
+  const chartData = data || dailyHistory || []
 
   if (!chartData || chartData.length === 0) {
     return (
-      <div className="bg-white rounded-xl shadow-lg p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Daily P&L</h3>
-        <div className="h-[200px] flex items-center justify-center text-gray-500">
+      <div className="bg-dark-card border border-dark-border rounded-lg p-6">
+        <div className="text-sm font-semibold text-dark-text mb-4">Daily P&L</div>
+        <div className="h-[180px] flex items-center justify-center text-dark-muted">
           No P&L data available
         </div>
       </div>
@@ -174,34 +108,25 @@ export function DailyPnlChart({ data }: DailyPnlChartProps) {
   const totalPnl = chartData.reduce((sum, d) => sum + d.pnl, 0)
 
   return (
-    <div className="bg-white rounded-xl shadow-lg p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-gray-900">Daily P&L</h3>
-        <span className={`text-lg font-bold ${totalPnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+    <div className="bg-dark-card border border-dark-border rounded-lg">
+      <div className="px-4 py-3 border-b border-dark-border flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-dark-text">Daily P&L</h2>
+        <span className={`text-base font-bold ${totalPnl >= 0 ? 'text-profit' : 'text-loss'}`}>
           {totalPnl >= 0 ? '+' : ''}{formatCurrency(totalPnl)}
         </span>
       </div>
-      <ResponsiveContainer width="100%" height={200}>
-        <BarChart data={chartData}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-          <XAxis dataKey="time" tick={{ fontSize: 10 }} stroke="#9CA3AF" />
-          <YAxis tick={{ fontSize: 10 }} stroke="#9CA3AF" tickFormatter={(value) => `$${value}`} />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: '#1F2937',
-              border: 'none',
-              borderRadius: '8px',
-              color: '#F9FAFB',
-            }}
-            formatter={(value: number) => [formatCurrency(value), 'P&L']}
-          />
-          <Bar
-            dataKey="pnl"
-            fill={(entry: { pnl: number }) => entry.pnl >= 0 ? COLORS.success : COLORS.danger}
-            radius={[4, 4, 0, 0]}
-          />
-        </BarChart>
-      </ResponsiveContainer>
+      <div className="p-4">
+        <div className="space-y-1 max-h-[180px] overflow-y-auto">
+          {chartData.map((item, index) => (
+            <div key={index} className="flex items-center justify-between text-xs py-1">
+              <span className="text-dark-muted">{item.time}</span>
+              <span className={item.pnl >= 0 ? 'text-profit' : 'text-loss'}>
+                {item.pnl >= 0 ? '+' : ''}{formatCurrency(item.pnl)}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -213,9 +138,9 @@ interface VolumeChartProps {
 export function VolumeChart({ data }: VolumeChartProps) {
   if (!data || data.length === 0) {
     return (
-      <div className="bg-white rounded-xl shadow-lg p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Volume Profile</h3>
-        <div className="h-[150px] flex items-center justify-center text-gray-500">
+      <div className="bg-dark-card border border-dark-border rounded-lg p-6">
+        <div className="text-sm font-semibold text-dark-text mb-4">Volume Profile</div>
+        <div className="h-[140px] flex items-center justify-center text-dark-muted">
           No volume data available
         </div>
       </div>
@@ -223,25 +148,20 @@ export function VolumeChart({ data }: VolumeChartProps) {
   }
 
   return (
-    <div className="bg-white rounded-xl shadow-lg p-6">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">Volume Profile</h3>
-      <ResponsiveContainer width="100%" height={150}>
-        <ComposedChart data={data}>
-          <XAxis dataKey="time" tick={{ fontSize: 10 }} stroke="#9CA3AF" />
-          <YAxis yAxisId="left" tick={{ fontSize: 10 }} stroke="#9CA3AF" />
-          <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10 }} stroke="#9CA3AF" />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: '#1F2937',
-              border: 'none',
-              borderRadius: '8px',
-              color: '#F9FAFB',
-            }}
-          />
-          <Bar yAxisId="left" dataKey="volume" fill={COLORS.info} opacity={0.6} name="Volume" />
-          <Line yAxisId="right" type="monotone" dataKey="price" stroke={COLORS.primary} strokeWidth={2} name="Price" dot={false} />
-        </ComposedChart>
-      </ResponsiveContainer>
+    <div className="bg-dark-card border border-dark-border rounded-lg">
+      <div className="px-4 py-3 border-b border-dark-border">
+        <h2 className="text-sm font-semibold text-dark-text">Volume Profile</h2>
+      </div>
+      <div className="p-4">
+        <div className="space-y-1 max-h-[140px] overflow-y-auto">
+          {data.map((item, index) => (
+            <div key={index} className="flex items-center justify-between text-xs py-1">
+              <span className="text-dark-muted">{item.time}</span>
+              <span className="text-dark-text">{formatNumber(item.volume)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

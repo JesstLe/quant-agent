@@ -9,13 +9,72 @@ Supported providers:
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
+import json
+import re
+from types import SimpleNamespace
 from typing import Any, Iterator
 
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-from langchain_core.outputs import ChatResult
+try:
+    from langchain_core.language_models import BaseChatModel
+    from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+except ImportError:  # pragma: no cover - local fallback for lightweight demo environments
+    class BaseChatModel:  # type: ignore[override]
+        """Fallback BaseChatModel placeholder."""
 
-from quant_agent.config import get_settings
+    class BaseMessage:  # type: ignore[override]
+        """Fallback message type used by the offline provider."""
+
+        def __init__(self, content: str = "", type: str = "human"):
+            self.content = content
+            self.type = type
+
+    class HumanMessage(BaseMessage):
+        def __init__(self, content: str):
+            super().__init__(content=content, type="human")
+
+    class SystemMessage(BaseMessage):
+        def __init__(self, content: str):
+            super().__init__(content=content, type="system")
+
+def get_settings() -> Any:
+    """Load application settings, falling back to empty defaults in demo environments."""
+    try:
+        from quant_agent.config import get_settings as _get_settings
+    except ImportError:
+        return SimpleNamespace(
+            openai_api_key="",
+            openai_org_id="",
+            openai_base_url="",
+            anthropic_api_key="",
+            google_api_key="",
+            aws_access_key_id="",
+            aws_secret_access_key="",
+            aws_region="us-east-1",
+            azure_openai_api_key="",
+            azure_openai_endpoint="",
+            azure_openai_api_version="2024-02-15-preview",
+            groq_api_key="",
+            cohere_api_key="",
+            mistral_api_key="",
+            together_api_key="",
+            replicate_api_key="",
+            deepseek_api_key="",
+            qwen_api_key="",
+            ernie_api_key="",
+            ernie_secret_key="",
+            glm_api_key="",
+            moonshot_api_key="",
+            spark_app_id="",
+            spark_api_key="",
+            spark_api_secret="",
+            doubao_api_key="",
+            doubao_endpoint_id="",
+            yi_api_key="",
+            baichuan_api_key="",
+            minimax_api_key="",
+            minimax_group_id="",
+        )
+    return _get_settings()
 
 
 class ModelProvider(Enum):
@@ -155,6 +214,120 @@ class LangChainProvider(LLMProvider):
 
         response = await self.client.ainvoke(messages)
         return response.content
+
+
+class OfflineProvider(LLMProvider):
+    """Deterministic fallback provider for local development without API keys."""
+
+    async def generate(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+        **kwargs: Any,
+    ) -> str:
+        combined = f"{system_prompt or ''}\n{prompt}".lower()
+
+        if "respond in valid json" in combined or "generate a trading signal" in combined:
+            return self._signal_response(prompt)
+
+        if "assess risk for this trade" in combined:
+            return (
+                "Offline risk review: keep position sizing conservative, respect stop loss, "
+                "and avoid adding exposure if the portfolio is already concentrated."
+            )
+
+        if "analyze portfolio risk" in combined:
+            return (
+                "Offline portfolio review: exposure appears manageable for demo mode. "
+                "Watch concentration, drawdown, and cumulative intraday losses."
+            )
+
+        if "analyze execution quality" in combined:
+            return (
+                "Offline execution review: fills are simulated, so treat slippage and fill-rate "
+                "as demo metrics rather than production-quality execution analytics."
+            )
+
+        if "interpret the sentiment analysis" in combined:
+            return (
+                "Offline sentiment interpretation: use the recent news tone as a supporting input, "
+                "not a standalone trading trigger."
+            )
+
+        if "overall market sentiment" in combined:
+            return (
+                "Offline market overview: mixed conditions with selective momentum opportunities. "
+                "Favor liquid symbols with clean trends and controlled downside."
+            )
+
+        return (
+            "Offline analysis mode is active. This response is generated locally because no live "
+            "LLM API credentials were detected."
+        )
+
+    async def generate_with_history(
+        self,
+        messages: list[BaseMessage],
+        **kwargs: Any,
+    ) -> str:
+        prompt = "\n".join(str(message.content) for message in messages)
+        return await self.generate(prompt, **kwargs)
+
+    def _signal_response(self, prompt: str) -> str:
+        current_price = self._extract_float(prompt, r"CURRENT PRICE:\s*\$?([0-9]+(?:\.[0-9]+)?)", 100.0)
+        sentiment_score = self._extract_float(prompt, r"Score:\s*([0-9]+(?:\.[0-9]+)?)", 0.5)
+        rsi = self._extract_float(prompt, r"RSI:\s*([0-9]+(?:\.[0-9]+)?)", 50.0)
+        bullish = "bullish" in prompt.lower()
+        bearish = "bearish" in prompt.lower()
+
+        signal_type = "hold"
+        confidence = 0.55
+
+        if bullish or sentiment_score >= 0.6 or rsi < 35:
+            signal_type = "buy"
+            confidence = 0.74
+        elif bearish or sentiment_score <= 0.4 or rsi > 70:
+            signal_type = "sell"
+            confidence = 0.7
+
+        stop_buffer = current_price * 0.05
+        target_buffer = stop_buffer * 2
+
+        if signal_type == "buy":
+            target_price = current_price + target_buffer
+            stop_loss = current_price - stop_buffer
+            rationale = "Price structure and sentiment support a cautious long setup in offline mode."
+        elif signal_type == "sell":
+            target_price = current_price - target_buffer
+            stop_loss = current_price + stop_buffer
+            rationale = "Momentum and sentiment suggest downside risk in offline mode."
+        else:
+            target_price = current_price
+            stop_loss = current_price - stop_buffer
+            rationale = "Signals are mixed, so capital preservation takes priority."
+
+        payload = {
+            "signal_type": signal_type,
+            "confidence": round(confidence, 2),
+            "entry_price": round(current_price, 2),
+            "target_price": round(target_price, 2),
+            "stop_loss": round(stop_loss, 2),
+            "timeframe": "medium",
+            "rationale": rationale,
+            "risk_factors": ["Offline LLM fallback", "No live macro context"],
+            "confirmation_signals": ["Price action", "Sentiment proxy"],
+        }
+        return json.dumps(payload)
+
+    @staticmethod
+    def _extract_float(text: str, pattern: str, default: float) -> float:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            return default
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return default
 
     async def generate_with_history(
         self,
@@ -787,7 +960,10 @@ def get_llm(
 
     # Auto-detect provider if not specified
     if provider is None:
-        provider = _auto_detect_provider()
+        detected = _auto_detect_provider()
+        if detected is None:
+            return OfflineProvider()
+        provider = detected
 
     # Convert string to enum
     if isinstance(provider, str):
@@ -805,7 +981,7 @@ def get_llm(
     return provider_class(model=model, **kwargs)
 
 
-def _auto_detect_provider() -> ModelProvider:
+def _auto_detect_provider() -> ModelProvider | None:
     """Auto-detect the best available provider based on API keys."""
     settings = get_settings()
 
@@ -830,8 +1006,7 @@ def _auto_detect_provider() -> ModelProvider:
         if api_key:
             return provider
 
-    # Default to OpenAI if no keys found (will fail gracefully)
-    return ModelProvider.OPENAI
+    return None
 
 
 def list_providers() -> list[dict[str, str]]:

@@ -1,26 +1,24 @@
-import React from 'react'
-import { useApp } from '../hooks/useApp'
-import { formatCurrency, formatPercent } from '../utils/formatters'
+import { useApp } from '../../hooks/useApp'
+import { formatCurrency, formatPercent, formatRelativeTime } from '../../utils/formatters'
 
-import { PortfolioMetrics, Position } from '../hooks/useApp'
-
-export function PortfolioSummaryCard() {
-  const { portfolio, isLoading } = useApp()
+export function PortfolioSummary() {
+  const { portfolio, riskMetrics, lastUpdate, isLoading } = useApp()
 
   if (isLoading) {
     return (
-      <div className="bg-white rounded-xl shadow-lg p-6 animate-pulse">
-        <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-        <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-        <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-        <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+      <div className="bg-dark-card border border-dark-border rounded-lg p-6 animate-pulse">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-20 bg-dark-hover rounded"></div>
+          ))}
+        </div>
       </div>
     )
   }
 
   if (!portfolio) {
     return (
-      <div className="bg-white rounded-xl shadow-lg p-6 text-center text-gray-500">
+      <div className="bg-dark-card border border-dark-border rounded-lg p-6 text-center text-dark-muted">
         No portfolio data available
       </div>
     )
@@ -29,51 +27,94 @@ export function PortfolioSummaryCard() {
   const metrics = [
     {
       label: 'Total Value',
-      value: formatCurrency(portfolio.totalValue),
-      change: portfolio.dayPnlPercent,
-      icon: (
-        <svg className="w-5 h-5" fill="none" viewBoxBox="0 0 16 16" fill="currentColor">
-          <path d="M12 8c-4 4a5 7.09l-1.42 1-1.42.9 0-8.63-.63-.63zm5.63-.28h5.63-.28 6-1.64-.77-.28-5.63-.28 7.3-.3-.28 5.63 1.63-1.63 0 .63-.28 6-1.58v6.17.28 3-.3-.28 5.63.28 3.53.48 5.63-.31z" />
-        </svg>
-      ),
-      color: portfolio.dayPnlPercent >= 0 ? 'text-green-500' : 'text-red-500',
+      value: formatCurrency(portfolio.totalValue, true),
+      subValue: formatCurrency(portfolio.dayPnl),
+      subLabel: 'Day P&L',
+      isPositive: portfolio.dayPnl >= 0,
     },
     {
-      label: 'Day P&L',
-      value: formatCurrency(portfolio.dayPnl),
-      change: portfolio.dayPnlPercent,
-      icon: (
-        <svg className="w-5 h-5" fill="none" viewBoxBox="0 0 16 16" fill="currentColor">
-          <path d="M3 4a3 4 1 0-1.5-1.5-1.5-1.41 1.16 1.41.1 0 1.41 2 21.5.12c1.5-1.5h1.5v-1.5h-1.5-1.5h-1.5-1.5-1.5 1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5-1.5 1.5-1.5-1.5-1.5-1.5-1.5-1.5-1.5-1.5 1.5-1.5 1.5-1.5 1.5 1.5-1.5-1.5 1.5-1.5-1.5-1.5-1.5-1.5-1.5-1.5-1.5-1.5-1.5-1.5 1.5-1.5-1.5-1.5-1.5-1.5-1.5-1.5 1.5-1.5 1.5-1.5 1.5 1.5-1.5 1.5 1.5-1.5 1.5 1.5-1.5 1.5 1.5-1.5 1.5 1.5-1.5 1.5-1.5 1.5-1.5 1.5 1.5-1.5 1.5-1.5 1.5 1.5 1.5-1.5 1.5-1.5 1.5-1.5 1.5-1.5 1.5 1.5-1.5 1.5 1.5-1.5 1.5 1.5-1.5 1.5 1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5 1.5 1.5 1.5-1.5 1.5 1.5 1.5 1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5 1.5-1.5 1.5 1.5 1.5 1.5 1.5-1.5 1.5 1.5 1.5 1.5-1.5-1.5-1.5-1.5 1.5-1.5 1.5 1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5-1.5 1.5 1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5 1.5 1.5 1.5 1.5 1.5 1.5-1.5-1) 1.5-1.5 1.5 1.5 1.5 1.5 1.5-1.5-1.5 1.5-1.5) 0),
-        borderColor: portfolio.dayPnlPercent >= 0 ? 'text-red-500' : 'text-green-500'
+      label: 'Day Return',
+      value: formatPercent(portfolio.dayPnlPercent),
+      subValue: formatPercent(portfolio.weekPnlPercent),
+      subLabel: 'Week',
+      isPositive: portfolio.dayPnlPercent >= 0,
     },
     {
-      label: 'Cash Balance',
-      value: formatCurrency(portfolio.cashBalance),
-      icon: (
-        <svg className="w-5 h-5" fill="none" viewBoxBox="0 0 16 16" fill="currentColor">
-          <path d="M21 4 4a5 7-7 4.12c4.12 7.5.2c-4 2.5-4 2.5-4 2.5-4 1.41-1.41.1 0-2.15-.28-1.41-1.41-.28 1.41-2.15-1.41-2.15-.84C-2.12-.41-.84.5 2.5-1.41-.41 1.41-1.41-1.41-2.15-.41-.5c-.84 2 0-1.41 2 1.41-3.18-1.41 1.41 3 1.5-3 1.5 2-3C1.5-2 1.41-2.18-1.79.5-2vgs
-          </="bug report" in sidebar
-        <button className="text-sm text-gray-600 hover:text-gray-800">View Report</button>
-      )}
-    </div>
-  )
+      label: 'Sharpe Ratio',
+      value: portfolio.sharpeRatio.toFixed(2),
+      subValue: `${portfolio.winRate.toFixed(1)}%`,
+      subLabel: 'Win Rate',
+      isPositive: portfolio.sharpeRatio >= 1,
+    },
+    {
+      label: 'Max Drawdown',
+      value: formatPercent(portfolio.maxDrawdown),
+      subValue: riskMetrics ? `Risk: ${riskMetrics.overallRiskScore}/10` : 'Risk: --',
+      subLabel: 'Risk Score',
+      isPositive: portfolio.maxDrawdown >= -5,
+      invertColors: true,
+    },
+  ]
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-      {metrics.map((metric) => (
-        <div key={metric.label} className="bg-white rounded-lg p-4 shadow">
-          <div className="flex items-center justify-between">
-            <span className="text-2xl font-bold text-gray-900">
-              {metric.value}
-            </span>
-            {metric.icon && <span className={`ml-1 ${metric.change >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-              <span className="ml-2 text-sm text-gray-500">
-                {formatPercent(metric.change)}
-              </span>
+    <div className="bg-dark-card border border-dark-border rounded-lg">
+      <div className="px-4 py-3 border-b border-dark-border flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-dark-text">Portfolio Overview</h2>
+        {lastUpdate && (
+          <span className="text-xs text-dark-muted">
+            Updated {formatRelativeTime(lastUpdate)}
+          </span>
+        )}
+      </div>
+      <div className="p-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {metrics.map((metric) => (
+            <div key={metric.label} className="bg-dark-hover rounded-lg p-4">
+              <div className="text-xs text-dark-muted uppercase tracking-wider mb-2">
+                {metric.label}
+              </div>
+              <div className={`text-2xl font-bold ${metric.isPositive ? 'text-profit' : 'text-loss'}`}>
+                {metric.value}
+              </div>
+              <div className="flex items-center justify-between mt-2 text-xs">
+                <span className="text-dark-muted">{metric.subLabel}:</span>
+                <span className={metric.invertColors
+                  ? (metric.isPositive ? 'text-profit' : 'text-loss')
+                  : (parseFloat(metric.subValue.replace(/[^0-9.-]/g, '')) >= 0 ? 'text-profit' : 'text-loss')}>
+                  {metric.subValue}
+                </span>
+              </div>
             </div>
           ))}
-        ))}
+        </div>
+
+        {/* Position Summary */}
+        <div className="mt-4 pt-4 border-t border-dark-border">
+          <div className="flex items-center justify-between text-sm">
+            <div className="flex items-center gap-6">
+              <div>
+                <span className="text-dark-muted">Invested: </span>
+                <span className="text-dark-text font-medium">
+                  {formatCurrency(portfolio.investedValue, true)}
+                </span>
+              </div>
+              <div>
+                <span className="text-dark-muted">Cash: </span>
+                <span className="text-dark-text font-medium">
+                  {formatCurrency(portfolio.cashBalance, true)}
+                </span>
+              </div>
+              <div>
+                <span className="text-dark-muted">Positions: </span>
+                <span className="text-dark-text font-medium">{portfolio.positions.length}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-profit animate-pulse"></span>
+              <span className="text-xs text-dark-muted">Live</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )

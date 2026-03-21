@@ -37,6 +37,9 @@ htmlcov/
 
 .DS_Store
 *.pyc
+node_modules/
+frontend/node_modules/
+frontend/.vite/
 data/
 *.db
 *.db-journal

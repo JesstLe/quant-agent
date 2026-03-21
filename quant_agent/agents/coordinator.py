@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
-from quant_agent.agents.base import AgentContext, AgentRole, BaseAgent
+from quant_agent.agents.base import AgentContext
 from quant_agent.agents.executor import ExecutorAgent
 from quant_agent.agents.researcher import ResearcherAgent
 from quant_agent.agents.risk_manager import RiskManagerAgent
@@ -98,7 +98,7 @@ class CoordinatorAgent:
                 print("\n[Coordinator] Cycle complete. Waiting 1 hour for next cycle...")
                 await asyncio.sleep(3600)  # 1 hour
 
-        except asyncio.Cancelled:
+        except asyncio.CancelledError:
             print("[Coordinator] System stopped by user")
         except Exception as e:
             print(f"[Coordinator] Error: {e}")

@@ -73,10 +73,11 @@ You must be conservative - when in doubt, REJECT the trade."""
             return {"error": f"Unknown task: {task}"}
 
     async def _assess_trade(
-        self, signal: TradingSignal | None, current_price: float | None
+        self, signal: TradingSignal | dict[str, Any] | None, current_price: float | None
     ) -> dict[str, Any]:
         """Assess the risk of a proposed trade."""
-        if signal is None:
+        signal_obj = self._normalize_signal(signal)
+        if signal_obj is None:
             return {"error": "No signal provided"}
 
         # Calculate position metrics
@@ -88,18 +89,18 @@ You must be conservative - when in doubt, REJECT the trade."""
         risk_score = 0.0
 
         # Check confidence
-        if signal.confidence < 0.6:
-            warnings.append(f"Low confidence signal: {signal.confidence:.2f}")
+        if signal_obj.confidence < 0.6:
+            warnings.append(f"Low confidence signal: {signal_obj.confidence:.2f}")
             risk_score += 0.2
 
         # Check if stop loss exists
-        if signal.stop_loss is None:
+        if signal_obj.stop_loss is None:
             warnings.append("No stop loss defined - REJECTING")
             approved = False
         else:
             # Calculate risk per share
-            entry = signal.entry_price or current_price or 0
-            risk_per_share = abs(entry - signal.stop_loss)
+            entry = signal_obj.entry_price or current_price or 0
+            risk_per_share = abs(entry - signal_obj.stop_loss)
             risk_ratio = risk_per_share / entry if entry > 0 else 0
 
             if risk_ratio > 0.05:  # More than 5% risk per trade
@@ -107,8 +108,8 @@ You must be conservative - when in doubt, REJECT the trade."""
                 risk_score += 0.3
 
         # Check existing positions
-        if signal.symbol in self._positions:
-            warnings.append(f"Already have position in {signal.symbol}")
+        if signal_obj.symbol in self._positions:
+            warnings.append(f"Already have position in {signal_obj.symbol}")
             risk_score += 0.1
 
         # Check portfolio concentration
@@ -120,11 +121,11 @@ You must be conservative - when in doubt, REJECT the trade."""
         # Use LLM for additional analysis
         prompt = f"""Assess risk for this trade:
 
-Signal: {signal.symbol} {signal.signal_type.value}
-Confidence: {signal.confidence}
-Entry: {signal.entry_price}
-Target: {signal.target_price}
-Stop Loss: {signal.stop_loss}
+Signal: {signal_obj.symbol} {signal_obj.signal_type.value}
+Confidence: {signal_obj.confidence}
+Entry: {signal_obj.entry_price}
+Target: {signal_obj.target_price}
+Stop Loss: {signal_obj.stop_loss}
 Current Capital: {capital}
 Current Exposure: {total_exposure}
 
@@ -145,7 +146,7 @@ Provide:
             approved=approved and risk_score < 0.7,
             risk_score=risk_score,
             max_position_size=min(max_position, capital * (1 - risk_score) * 0.1),
-            suggested_stop_loss=signal.stop_loss,
+            suggested_stop_loss=signal_obj.stop_loss,
             warnings=warnings,
             rationale=llm_assessment,
         )
@@ -154,16 +155,16 @@ Provide:
         self.memory.add(
             MemoryType.DECISION,
             content={
-                "symbol": signal.symbol,
+                "symbol": signal_obj.symbol,
                 "assessment": assessment.__dict__,
-                "signal": signal.__dict__ if hasattr(signal, "__dict__") else str(signal),
+                "signal": signal_obj.to_dict(),
             },
             metadata={"task": "assess_trade"},
             importance=0.8,
         )
 
         return {
-            "symbol": signal.symbol,
+            "symbol": signal_obj.symbol,
             "approved": assessment.approved,
             "risk_score": assessment.risk_score,
             "max_position_size": assessment.max_position_size,
@@ -180,6 +181,12 @@ Provide:
         # Calculate basic metrics
         exposure_ratio = total_exposure / capital if capital > 0 else 0
         num_positions = len([p for p in self._positions.values() if p > 0])
+        risk_score = min(
+            1.0,
+            exposure_ratio * 0.6
+            + min(num_positions / max(len(self.context.symbols), 1), 1.0) * 0.2
+            + (abs(min(self._daily_pnl, 0)) / max(capital * 0.02, 1)) * 0.2,
+        )
 
         # Use LLM for comprehensive risk analysis
         prompt = f"""Analyze portfolio risk:
@@ -206,6 +213,7 @@ Calculate and assess:
             "exposure_ratio": exposure_ratio,
             "num_positions": num_positions,
             "daily_pnl": self._daily_pnl,
+            "risk_score": risk_score,
             "analysis": analysis,
         }
 
@@ -217,6 +225,14 @@ Calculate and assess:
         )
 
         return risk_metrics
+
+    @staticmethod
+    def _normalize_signal(signal: TradingSignal | dict[str, Any] | None) -> TradingSignal | None:
+        if signal is None:
+            return None
+        if isinstance(signal, TradingSignal):
+            return signal
+        return TradingSignal.from_dict(signal)
 
     async def _check_limits(self) -> dict[str, Any]:
         """Check if any risk limits are breached."""

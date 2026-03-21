@@ -1,16 +1,39 @@
-import React from 'react'
-import { useApp } from '../hooks/useApp'
-import { Signal } from '../hooks/useApp'
+import { useState } from 'react'
+import { useApp } from '../../hooks/useApp'
+import { formatPercent, formatRelativeTime } from '../../utils/formatters'
+import type { SignalType, SignalStatus } from '../../types'
+
+const typeStyles: Record<SignalType, string> = {
+  BUY: 'bg-profit/20 text-profit border-profit/30',
+  SELL: 'bg-loss/20 text-loss border-loss/30',
+  HOLD: 'bg-dark-muted/20 text-dark-muted border-dark-muted/30',
+}
+
+const statusStyles: Record<SignalStatus, string> = {
+  PENDING: 'bg-warning/20 text-warning',
+  APPROVED: 'bg-profit/20 text-profit',
+  EXECUTING: 'bg-info/20 text-info animate-pulse',
+  EXECUTED: 'bg-profit/30 text-profit',
+  REJECTED: 'bg-loss/20 text-loss',
+  CANCELLED: 'bg-dark-muted/20 text-dark-muted',
+}
+
+const confidenceColor = (confidence: number): string => {
+  if (confidence >= 0.8) return 'bg-profit'
+  if (confidence >= 0.6) return 'bg-warning'
+  return 'bg-loss'
+}
 
 export function SignalsPanel() {
   const { signals, isLoading } = useApp()
+  const [expandedId, setExpandedId] = useState<string | null>(null)
 
   if (isLoading) {
     return (
-      <div className="bg-white rounded-xl shadow-lg p-6 animate-pulse">
-        <div className="space-y-4">
+      <div className="bg-dark-card border border-dark-border rounded-lg p-6 animate-pulse">
+        <div className="space-y-3">
           {[...Array(3)].map((_, i) => (
-            <div key={i} className="h-20 bg-gray-200 rounded"></div>
+            <div key={i} className="h-24 bg-dark-hover rounded"></div>
           ))}
         </div>
       </div>
@@ -19,92 +42,144 @@ export function SignalsPanel() {
 
   if (signals.length === 0) {
     return (
-      <div className="bg-white rounded-xl shadow-lg p-6 text-center text-gray-500">
+      <div className="bg-dark-card border border-dark-border rounded-lg p-6 text-center text-dark-muted">
+        <svg className="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+        </svg>
         No signals generated yet
       </div>
     )
   }
 
-  const getStatusColor = (status: Signal['status']) => {
-    switch (status) {
-      case 'APPROVED':
-        return 'bg-green-100 text-green-800'
-      case 'EXECUTED':
-        return 'bg-blue-100 text-blue-800'
-      case 'REJECTED':
-        return 'bg-red-100 text-red-800'
-      default:
-        return 'bg-yellow-100 text-yellow-800'
-    }
-  }
-
-  const getTypeColor = (type: Signal['type']) => {
-    switch (type) {
-      case 'BUY':
-        return 'text-green-600 bg-green-50'
-      case 'SELL':
-        return 'text-red-600 bg-red-50'
-      default:
-        return 'text-gray-600 bg-gray-50'
-    }
-  }
-
   return (
-    <div className="bg-white rounded-xl shadow-lg p-6">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Signals</h3>
-      <div className="space-y-3">
-        {signals.slice(0, 5).map((signal) => (
-          <div key={signal.id} className="border border-gray-200 rounded-lg p-4">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-3">
-                <span className={`px-2 py-1 text-xs font-medium rounded ${getTypeColor(signal.type)}`}>
-                  {signal.type}
-                </span>
-                <span className="font-medium text-gray-900">{signal.symbol}</span>
-              </div>
-              <span className={`px-2 py-1 text-xs rounded ${getStatusColor(signal.status)}`}>
-                {signal.status}
-              </span>
-            </div>
-            <div className="grid grid-cols-3 gap-4 text-sm text-gray-600 mb-2">
-              <div>
-                <span className="block text-gray-500">Entry</span>
-                <span className="font-medium">${signal.entryPrice.toFixed(2)}</span>
-              </div>
-              <div>
-                <span className="block text-gray-500">Target</span>
-                <span className="font-medium">{signal.targetPrice.toFixed(2)}</span>
-              </div>
-              <div>
-                <span className="block text-gray-500">Stop Loss</span>
-                <span className="font-medium">{signal.stopLoss.toFixed(2)}</span>
-              </div>
-            </div>
-            <div className="mt-2">
-              <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
-                <span>Confidence</span>
-                <span>Rationale</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-24 h-2 bg-gray-200 rounded-full">
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${signal.confidence * 100}%`,
-                        backgroundColor: signal.confidence >= 0.7 ? '#10B9818' : '#EF4444'
-                      }}
-                    />
+    <div className="bg-dark-card border border-dark-border rounded-lg">
+      <div className="px-4 py-3 border-b border-dark-border flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-dark-text">Recent Signals</h2>
+        <span className="text-xs text-dark-muted">
+          {signals.filter(s => s.status === 'PENDING').length} pending
+        </span>
+      </div>
+      <div className="p-4 space-y-3 max-h-[500px] overflow-y-auto">
+        {signals.map((signal) => {
+          const isExpanded = expandedId === signal.id
+          return (
+            <div
+              key={signal.id}
+              className="bg-dark-hover border border-dark-border rounded-lg overflow-hidden"
+            >
+              {/* Header */}
+              <div
+                className="p-3 cursor-pointer hover:bg-dark-border/30 transition-colors"
+                onClick={() => setExpandedId(isExpanded ? null : signal.id)}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-3">
+                    <span className={`px-2 py-0.5 text-xs font-semibold rounded border ${typeStyles[signal.type]}`}>
+                      {signal.type}
+                    </span>
+                    <span className="font-medium text-dark-text">{signal.symbol}</span>
+                    <span className="text-xs text-dark-muted">by {signal.agentSource}</span>
                   </div>
-                  <span className="text-sm font-medium">{(signal.confidence * 100).toFixed(0)}%</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 text-xs rounded ${statusStyles[signal.status]}`}>
+                      {signal.status}
+                    </span>
+                    <svg
+                      className={`w-4 h-4 text-dark-muted transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
                 </div>
-                <span className="text-xs text-gray-500 truncate max-w-xs">
-                  {signal.rationale}
-                </span>
+
+                {/* Quick Stats */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4 text-xs">
+                    <span className="text-dark-muted">
+                      Entry: <span className="text-dark-text">${signal.entryPrice.toFixed(2)}</span>
+                    </span>
+                    <span className="text-dark-muted">
+                      Target: <span className="text-profit">${signal.targetPrice.toFixed(2)}</span>
+                    </span>
+                    <span className="text-dark-muted">
+                      Stop: <span className="text-loss">${signal.stopLoss.toFixed(2)}</span>
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-16 h-1.5 bg-dark-border rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${confidenceColor(signal.confidence)}`}
+                        style={{ width: `${signal.confidence * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-xs text-dark-muted">
+                      {(signal.confidence * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                </div>
               </div>
+
+              {/* Expanded Details */}
+              {isExpanded && (
+                <div className="px-3 pb-3 pt-0 border-t border-dark-border animate-fade-in">
+                  <div className="pt-3 space-y-3">
+                    {/* Rationale */}
+                    <div>
+                      <div className="text-xs text-dark-muted mb-1">Rationale</div>
+                      <p className="text-sm text-dark-text">{signal.rationale}</p>
+                    </div>
+
+                    {/* Details Grid */}
+                    <div className="grid grid-cols-3 gap-4 text-xs">
+                      {signal.expectedReturn && (
+                        <div>
+                          <span className="text-dark-muted">Expected Return</span>
+                          <div className={`font-medium ${signal.expectedReturn >= 0 ? 'text-profit' : 'text-loss'}`}>
+                            {formatPercent(signal.expectedReturn)}
+                          </div>
+                        </div>
+                      )}
+                      {signal.riskScore && (
+                        <div>
+                          <span className="text-dark-muted">Risk Score</span>
+                          <div className="font-medium text-dark-text">
+                            {signal.riskScore.toFixed(1)}/10
+                          </div>
+                        </div>
+                      )}
+                      {signal.quantity && (
+                        <div>
+                          <span className="text-dark-muted">Suggested Qty</span>
+                          <div className="font-medium text-dark-text">{signal.quantity}</div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Footer */}
+                    <div className="flex items-center justify-between pt-2 border-t border-dark-border">
+                      <span className="text-xs text-dark-muted">
+                        {formatRelativeTime(signal.timestamp)}
+                      </span>
+                      {signal.status === 'PENDING' && (
+                        <div className="flex gap-2">
+                          <button className="px-3 py-1 text-xs bg-loss/20 text-loss rounded hover:bg-loss/30 transition-colors">
+                            Reject
+                          </button>
+                          <button className="px-3 py-1 text-xs bg-profit/20 text-profit rounded hover:bg-profit/30 transition-colors">
+                            Approve
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

@@ -50,6 +50,38 @@ class TradingSignal:
             "position_size_pct": self.position_size_pct,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TradingSignal":
+        signal_type_raw = str(data.get("signal_type", "hold")).lower()
+        signal_type = {
+            "buy": SignalType.BUY,
+            "sell": SignalType.SELL,
+            "hold": SignalType.HOLD,
+        }.get(signal_type_raw, SignalType.HOLD)
+
+        return cls(
+            symbol=str(data.get("symbol", "")),
+            signal_type=signal_type,
+            confidence=float(data.get("confidence", 0.0)),
+            entry_price=_as_optional_float(data.get("entry_price")),
+            target_price=_as_optional_float(data.get("target_price")),
+            stop_loss=_as_optional_float(data.get("stop_loss")),
+            rationale=str(data.get("rationale", "")),
+            timeframe=str(data.get("timeframe", "medium")),
+            risk_reward_ratio=float(data.get("risk_reward_ratio", 0.0)),
+            position_size_pct=float(data.get("position_size_pct", 0.0)),
+            metadata=dict(data.get("metadata", {})),
+        )
+
+
+def _as_optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
 
 class StrategistAgent(BaseAgent):
     """

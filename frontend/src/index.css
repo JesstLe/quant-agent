@@ -2,82 +2,185 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Dark theme base styles */
 * {
   margin: 0;
   padding: 0;
-  box-sizing: border-box
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  box-sizing: border-box;
 }
 
- scroll-behavior: smooth
-  -webkit-font-smoothing: antialiased
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
- -moz-osx-font-smoothing: grayscale
-        text-rendering: optimizeLegibility;
-        -webkit-font-smoothing: antialiased
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: #0D1117;
+  color: #C9D1D9;
 }
 
- }
-}
-
- body {
-  margin: 0;
-  padding: 0;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
- }
-
- #root {
+#root {
   min-height: 100vh;
-  background-color: #f3f4f5;
- }
+  background-color: #0D1117;
+}
 
- /* Animations */
- @keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
- }
-
- @keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5
-  }
-  100% {
-    opacity: 1;
-  }
- }
-
- .animate-pulse {
-  animation: pulse 2s cubic-bezier(0.4,0 0.6, 1) infinite;
- }
-
- .animate-spin {
-  animation: spin 1s linear infinite
- }
-
- /* Scrollbar */
- ::-webkit-scrollbar {
+/* Custom scrollbar for dark theme */
+::-webkit-scrollbar {
   width: 8px;
   height: 8px;
- }
+}
 
- ::-webkit-scrollbar-track {
-  background: #f1f1f5;
+::-webkit-scrollbar-track {
+  background: #161B22;
   border-radius: 4px;
- }
+}
 
- ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+::-webkit-scrollbar-thumb {
+  background: #30363D;
   border-radius: 4px;
- }
+}
 
- ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8
- }
+::-webkit-scrollbar-thumb:hover {
+  background: #484F58;
+}
+
+/* Custom animations */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(63, 185, 80, 0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s infinite;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+/* Card styles */
+.card {
+  @apply bg-dark-card border border-dark-border rounded-lg shadow-dark;
+}
+
+.card-header {
+  @apply px-4 py-3 border-b border-dark-border flex items-center justify-between;
+}
+
+.card-title {
+  @apply text-sm font-semibold text-dark-text;
+}
+
+.card-body {
+  @apply p-4;
+}
+
+/* Table styles */
+.table-dark {
+  @apply w-full text-sm;
+}
+
+.table-dark th {
+  @apply px-4 py-3 text-left text-xs font-medium text-dark-muted uppercase tracking-wider border-b border-dark-border;
+}
+
+.table-dark td {
+  @apply px-4 py-3 border-b border-dark-border;
+}
+
+.table-dark tr:hover td {
+  @apply bg-dark-hover;
+}
+
+/* Badge styles */
+.badge {
+  @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
+}
+
+.badge-profit {
+  @apply bg-profit/20 text-profit;
+}
+
+.badge-loss {
+  @apply bg-loss/20 text-loss;
+}
+
+.badge-warning {
+  @apply bg-warning/20 text-warning;
+}
+
+.badge-info {
+  @apply bg-info/20 text-info;
+}
+
+/* Signal type badges */
+.badge-buy {
+  @apply bg-profit/20 text-profit border border-profit/30;
+}
+
+.badge-sell {
+  @apply bg-loss/20 text-loss border border-loss/30;
+}
+
+.badge-hold {
+  @apply bg-dark-muted/20 text-dark-muted border border-dark-muted/30;
+}
+
+/* Status indicators */
+.status-dot {
+  @apply w-2 h-2 rounded-full;
+}
+
+.status-running {
+  @apply bg-profit animate-pulse;
+}
+
+.status-idle {
+  @apply bg-warning;
+}
+
+.status-error {
+  @apply bg-loss;
+}
+
+/* Metric card */
+.metric-card {
+  @apply bg-dark-card border border-dark-border rounded-lg p-4;
+}
+
+.metric-label {
+  @apply text-xs text-dark-muted uppercase tracking-wider mb-1;
+}
+
+.metric-value {
+  @apply text-2xl font-bold text-dark-text;
+}
+
+.metric-change {
+  @apply text-sm mt-1;
+}
+
+.metric-change-positive {
+  @apply text-profit;
+}
+
+.metric-change-negative {
+  @apply text-loss;
+}

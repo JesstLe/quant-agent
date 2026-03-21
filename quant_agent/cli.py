@@ -100,12 +100,15 @@ def agents():
 def analyze(symbol: str):
     """Run AI analysis on a symbol."""
     from quant_agent.agents.researcher import ResearcherAgent
+    from quant_agent.core.llm import get_llm
+    from quant_agent.core.memory import AgentMemory
+    from quant_agent.core.tools import ToolRegistry
 
     console.print(f"[bold blue]Analyzing {symbol}...[/]")
 
     async def run_analysis():
-        researcher = ResearcherAgent()
-        analysis = await researcher.analyze(symbol)
+        researcher = ResearcherAgent(get_llm(), ToolRegistry(), AgentMemory())
+        analysis = await researcher.execute("analyze_symbol", symbol=symbol)
         console.print(analysis)
 
     asyncio.run(run_analysis())
@@ -118,6 +121,18 @@ def dashboard():
 
     console.print("[bold green]Starting Dashboard...[/]")
     subprocess.run(["streamlit", "run", "dashboard/app.py"])
+
+
+@main.command("serve-api")
+@click.option("--host", type=str, default="127.0.0.1", show_default=True, help="Bind host")
+@click.option("--port", type=int, default=8000, show_default=True, help="Bind port")
+@click.option("--reload/--no-reload", default=False, show_default=True, help="Enable auto reload")
+def serve_api(host: str, port: int, reload: bool):
+    """Start the FastAPI service used by the React dashboard."""
+    import uvicorn
+
+    console.print(f"[bold green]Starting API server on http://{host}:{port}[/]")
+    uvicorn.run("quant_agent.api.main:app", host=host, port=port, reload=reload)
 
 
 def _display_backtest_results(results: dict):

@@ -203,24 +203,25 @@ Always report:
 
     async def _place_order(
         self,
-        signal: TradingSignal | None = None,
+        signal: TradingSignal | dict[str, Any] | None = None,
         quantity: float | None = None,
         order_type: str = "limit",
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Place an order based on a trading signal."""
-        if signal is None:
+        signal_obj = self._normalize_signal(signal)
+        if signal_obj is None:
             return {"error": "No signal provided"}
 
         # Determine order parameters
-        side = "buy" if signal.signal_type == SignalType.BUY else "sell"
+        side = "buy" if signal_obj.signal_type == SignalType.BUY else "sell"
 
         # Calculate quantity if not provided
         if quantity is None:
             capital = self.context.capital if self._context else 100000
-            if signal.entry_price and signal.entry_price > 0:
-                position_value = capital * signal.position_size_pct
-                quantity = position_value / signal.entry_price
+            if signal_obj.entry_price and signal_obj.entry_price > 0:
+                position_value = capital * signal_obj.position_size_pct
+                quantity = position_value / signal_obj.entry_price
             else:
                 return {"error": "Cannot determine quantity without entry price"}
 
@@ -228,12 +229,12 @@ Always report:
         order_id = self._generate_order_id()
         order = Order(
             order_id=order_id,
-            symbol=signal.symbol,
+            symbol=signal_obj.symbol,
             side=side,
             quantity=quantity,
             order_type=OrderType.LIMIT if order_type == "limit" else OrderType.MARKET,
-            limit_price=signal.entry_price,
-            stop_price=signal.stop_loss,
+            limit_price=signal_obj.entry_price,
+            stop_price=signal_obj.stop_loss,
         )
 
         self._orders[order_id] = order
@@ -241,9 +242,9 @@ Always report:
 
         # Execute based on mode
         if self._context and self._context.mode == "paper":
-            result = await self._execute_paper(order, signal)
+            result = await self._execute_paper(order, signal_obj)
         else:
-            result = await self._execute_live(order, signal)
+            result = await self._execute_live(order, signal_obj)
 
         # Update order status
         order.status = result.status
@@ -266,10 +267,10 @@ Always report:
             MemoryType.TRADE,
             content={
                 "order": order.to_dict(),
-                "signal": signal.to_dict(),
+                "signal": signal_obj.to_dict(),
                 "execution_result": result.to_dict(),
             },
-            metadata={"task": "place_order", "symbol": signal.symbol},
+            metadata={"task": "place_order", "symbol": signal_obj.symbol},
             importance=0.9,
         )
 
@@ -518,6 +519,14 @@ Provide:
         report["analysis"] = await self.think(prompt)
 
         return report
+
+    @staticmethod
+    def _normalize_signal(signal: TradingSignal | dict[str, Any] | None) -> TradingSignal | None:
+        if signal is None:
+            return None
+        if isinstance(signal, TradingSignal):
+            return signal
+        return TradingSignal.from_dict(signal)
 
     async def _sweep_orders(self, symbol: str | None = None, **kwargs: Any) -> dict[str, Any]:
         """Cancel all open orders, optionally filtered by symbol."""
