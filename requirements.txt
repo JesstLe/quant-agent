@@ -1,0 +1,48 @@
+# Core
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# LLM & Agents
+langchain>=0.3.0
+langchain-anthropic>=0.3.0
+langchain-openai>=0.2.0
+langgraph>=0.2.0
+
+# Data
+pandas>=2.0.0
+numpy>=1.24.0
+yfinance>=0.2.0
+ccxt>=4.0.0
+akshare>=1.12.0
+
+# Technical Analysis
+pandas-ta>=0.3.14b
+
+# Backtesting
+backtrader>=1.9.78
+vectorbt>=0.26.0
+
+# API
+fastapi>=0.109.0
+uvicorn>=0.27.0
+websockets>=12.0
+
+# Dashboard
+streamlit>=1.30.0
+plotly>=5.18.0
+
+# Database
+sqlalchemy>=2.0.0
+aiosqlite>=0.19.0
+redis>=5.0.0
+
+# Async & Task
+aiohttp>=3.9.0
+httpx>=0.26.0
+celery>=5.3.0
+
+# Utils
+rich>=13.0.0
+loguru>=0.7.0
+tenacity>=8.2.0
