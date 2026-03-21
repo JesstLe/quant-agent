@@ -9,6 +9,7 @@ from datetime import UTC, date, datetime, timedelta
 import hashlib
 from typing import Any
 
+import pandas as pd
 import yfinance as yf
 
 from quant_agent.agents.base import AgentContext
@@ -22,6 +23,15 @@ from quant_agent.backtest.engine import BacktestEngine
 from quant_agent.core.llm import get_llm
 from quant_agent.core.memory import AgentMemory
 from quant_agent.core.tools import ToolRegistry
+
+A_SHARE_NAMES = {
+    "600519.SS": "贵州茅台",
+    "000858.SZ": "五粮液",
+    "601318.SS": "中国平安",
+    "600036.SS": "招商银行",
+    "000333.SZ": "美的集团",
+    "002594.SZ": "比亚迪",
+}
 
 
 def _iso(dt: datetime) -> str:
@@ -57,6 +67,8 @@ class DashboardRuntimeService:
         self.strategy = strategy
         self.capital = capital
         self.refresh_interval_seconds = refresh_interval_seconds
+        self.market = "A" if any(symbol.endswith((".SS", ".SZ")) for symbol in self.symbols) else "US"
+        self._state_key_prefix = f"{self.market.lower()}:"
 
         self._llm = get_llm()
         self._memory = AgentMemory()
@@ -118,12 +130,18 @@ class DashboardRuntimeService:
         return await self._update_signal_status(signal_id, "REJECTED")
 
     async def _ensure_fresh(self, force_refresh: bool = False) -> None:
+        if not force_refresh and self._snapshot_should_refresh():
+            force_refresh = True
+
         if not force_refresh and self._last_refresh is not None:
             age = (datetime.now(UTC) - self._last_refresh).total_seconds()
             if age < self.refresh_interval_seconds:
                 return
 
         async with self._lock:
+            if not force_refresh and self._snapshot_should_refresh():
+                force_refresh = True
+
             if not force_refresh and self._last_refresh is not None:
                 age = (datetime.now(UTC) - self._last_refresh).total_seconds()
                 if age < self.refresh_interval_seconds:
@@ -266,7 +284,7 @@ class DashboardRuntimeService:
             markets.append(
                 {
                     "symbol": symbol,
-                    "name": stock_info.get("name") or symbol,
+                    "name": A_SHARE_NAMES.get(symbol) or stock_info.get("name") or symbol,
                     "price": round(price, 2),
                     "change": round(change, 2),
                     "changePercent": round((change / previous_close) * 100, 2) if previous_close else 0.0,
@@ -572,17 +590,19 @@ class DashboardRuntimeService:
             return self._fallback.daily_history()
 
         series_by_symbol: list[list[tuple[str, float]]] = []
+
         for position in positions[:3]:
             try:
-                history = yf.Ticker(position.symbol).history(period="1d", interval="30m")
+                history = yf.Ticker(position.symbol).history(period="1d", interval="30m", auto_adjust=False)
                 if history.empty:
                     continue
 
                 history = history.reset_index()
+                time_column = "Datetime" if "Datetime" in history.columns else "Date"
                 open_price = float(history.iloc[0]["Close"])
                 symbol_series: list[tuple[str, float]] = []
                 for _, row in history.iterrows():
-                    timestamp = row.iloc[0]
+                    timestamp = pd.to_datetime(row[time_column])
                     price = float(row["Close"])
                     pnl = (price - open_price) * position.quantity
                     symbol_series.append((timestamp.strftime("%H:%M"), pnl))
@@ -600,6 +620,13 @@ class DashboardRuntimeService:
                 merged[timestamp] = merged.get(timestamp, 0.0) + pnl
 
         return [{"time": timestamp, "pnl": round(pnl, 2)} for timestamp, pnl in sorted(merged.items())]
+
+    def _snapshot_should_refresh(self) -> bool:
+        if self._last_refresh is None:
+            return True
+        if not self.symbols:
+            return False
+        return not bool(self._snapshot.get("markets"))
 
     def _expected_return_pct(self, signal: dict[str, Any]) -> float:
         entry = float(signal.get("entry_price") or 0)
@@ -792,40 +819,43 @@ class DashboardRuntimeService:
             strategy=self.strategy,
             mode="paper",
             capital=self.capital,
-            metadata={"source": "dashboard-runtime"},
+            metadata={"source": "dashboard-runtime", "market": self.market},
         )
         for agent in (self._researcher, self._strategist, self._risk_manager, self._executor):
             agent.set_context(context)
 
+    def _state_key(self, name: str) -> str:
+        return f"{self._state_key_prefix}{name}"
+
     def _persist_state(self) -> None:
         self._state_store.save_many(
             {
-                "snapshot": self._snapshot,
-                "logs": list(self._logs),
-                "executor_state": self._executor.export_state(),
-                "signal_overrides": self._signal_overrides,
-                "last_refresh": self._last_refresh.isoformat() if self._last_refresh else None,
+                self._state_key("snapshot"): self._snapshot,
+                self._state_key("logs"): list(self._logs),
+                self._state_key("executor_state"): self._executor.export_state(),
+                self._state_key("signal_overrides"): self._signal_overrides,
+                self._state_key("last_refresh"): self._last_refresh.isoformat() if self._last_refresh else None,
             }
         )
 
     def _restore_state(self) -> None:
-        snapshot = self._state_store.load("snapshot")
+        snapshot = self._state_store.load(self._state_key("snapshot"))
         if isinstance(snapshot, dict):
             self._snapshot = snapshot
 
-        logs = self._state_store.load("logs", [])
+        logs = self._state_store.load(self._state_key("logs"), [])
         if isinstance(logs, list):
             self._logs = deque(logs, maxlen=100)
 
-        executor_state = self._state_store.load("executor_state", {})
+        executor_state = self._state_store.load(self._state_key("executor_state"), {})
         if isinstance(executor_state, dict):
             self._executor.restore_state(executor_state)
 
-        signal_overrides = self._state_store.load("signal_overrides", {})
+        signal_overrides = self._state_store.load(self._state_key("signal_overrides"), {})
         if isinstance(signal_overrides, dict):
             self._signal_overrides = signal_overrides
 
-        last_refresh = self._state_store.load("last_refresh")
+        last_refresh = self._state_store.load(self._state_key("last_refresh"))
         if isinstance(last_refresh, str):
             try:
                 self._last_refresh = datetime.fromisoformat(last_refresh)

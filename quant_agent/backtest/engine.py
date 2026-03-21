@@ -191,9 +191,10 @@ class BacktestEngine:
             try:
                 ticker = yf.Ticker(symbol)
                 df = ticker.history(
-                    start=self.start_date - timedelta(days=100),  # Extra for indicators
+                    start=self.start_date - timedelta(days=100),
                     end=self.end_date + timedelta(days=1),
                     interval="1d",
+                    auto_adjust=False,
                 )
                 if not df.empty:
                     df["symbol"] = symbol

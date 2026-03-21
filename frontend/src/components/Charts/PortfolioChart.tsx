@@ -16,12 +16,12 @@ import {
 import { useApp } from '../../hooks/useApp'
 import type { HistoricalDataPoint, DailyHistoryPoint } from '../../types'
 import { formatCurrency, formatDate, formatNumber } from '../../utils/formatters'
+import { getDashboardCopy, getSignedFillColor, getSignedTextClass } from '../../utils/market'
 
 const PIE_COLORS = ['#58A6FF', '#8B5CF6', '#3FB950', '#D29922', '#F85149', '#06B6D4', '#EC4899', '#84CC16']
 const GRID_STROKE = '#21262D'
 const TEXT_MUTED = '#8B949E'
 const PROFIT = '#3FB950'
-const LOSS = '#F85149'
 const INFO = '#58A6FF'
 
 interface PortfolioChartProps {
@@ -78,17 +78,18 @@ function EmptyState({ title, message, height }: { title: string; message: string
 }
 
 export function PortfolioChart({ data }: PortfolioChartProps) {
-  const { historicalData } = useApp()
+  const { historicalData, marketType } = useApp()
+  const copy = getDashboardCopy(marketType)
   const chartData = (data || historicalData || []).map((point) => ({
     ...point,
-    shortDate: formatDate(point.date),
+    shortDate: formatDate(point.date, marketType),
   }))
 
   if (chartData.length === 0) {
     return (
       <EmptyState
-        title="Portfolio Performance"
-        message="No historical data available"
+        title={copy.portfolioPerformance}
+        message={copy.noHistorical}
         height="h-[280px]"
       />
     )
@@ -101,10 +102,10 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
   return (
     <div className="bg-dark-card border border-dark-border rounded-lg">
       <div className="px-4 py-3 border-b border-dark-border flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-dark-text">Portfolio Performance</h2>
+        <h2 className="text-sm font-semibold text-dark-text">{copy.portfolioPerformance}</h2>
         <div className="text-right">
-          <div className="text-xs text-dark-muted">30D Return</div>
-          <div className={`text-sm font-semibold ${totalReturn >= 0 ? 'text-profit' : 'text-loss'}`}>
+          <div className="text-xs text-dark-muted">{copy.return30d}</div>
+          <div className={`text-sm font-semibold ${getSignedTextClass(totalReturn, marketType)}`}>
             {totalReturn >= 0 ? '+' : ''}{totalReturn.toFixed(2)}%
           </div>
         </div>
@@ -112,13 +113,13 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
       <div className="p-4">
         <div className="mb-3 flex items-end justify-between">
           <div>
-            <div className="text-xs uppercase tracking-wider text-dark-muted">Current Equity</div>
+            <div className="text-xs uppercase tracking-wider text-dark-muted">{copy.currentEquity}</div>
             <div className="text-2xl font-semibold text-dark-text">
-              {formatCurrency(latestValue, true)}
+              {formatCurrency(latestValue, true, marketType)}
             </div>
           </div>
           <div className="text-xs text-dark-muted">
-            vs benchmark overlay
+            {copy.benchmarkOverlay}
           </div>
         </div>
         <div className="h-[280px]">
@@ -146,7 +147,7 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
                 tickLine={false}
                 axisLine={false}
                 width={72}
-                tickFormatter={(value) => formatCurrency(value, true)}
+                tickFormatter={(value) => formatCurrency(value, true, marketType)}
               />
               <Tooltip content={<ChartTooltip />} />
               <Area
@@ -182,7 +183,8 @@ interface AllocationPieChartProps {
 }
 
 export function AllocationPieChart({ data }: AllocationPieChartProps) {
-  const { portfolio } = useApp()
+  const { portfolio, marketType } = useApp()
+  const copy = getDashboardCopy(marketType)
   const chartData = data || portfolio?.positions?.map((pos) => ({
     name: pos.symbol,
     value: pos.marketValue,
@@ -191,8 +193,8 @@ export function AllocationPieChart({ data }: AllocationPieChartProps) {
   if (chartData.length === 0) {
     return (
       <EmptyState
-        title="Asset Allocation"
-        message="No positions to display"
+        title={copy.assetAllocation}
+        message={copy.noAllocation}
         height="h-[220px]"
       />
     )
@@ -203,7 +205,7 @@ export function AllocationPieChart({ data }: AllocationPieChartProps) {
   return (
     <div className="bg-dark-card border border-dark-border rounded-lg">
       <div className="px-4 py-3 border-b border-dark-border">
-        <h2 className="text-sm font-semibold text-dark-text">Asset Allocation</h2>
+        <h2 className="text-sm font-semibold text-dark-text">{copy.assetAllocation}</h2>
       </div>
       <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-[1.1fr_0.9fr]">
         <div className="h-[260px]">
@@ -236,7 +238,7 @@ export function AllocationPieChart({ data }: AllocationPieChartProps) {
                     <div className="rounded-lg border border-dark-border bg-dark-card/95 px-3 py-2 text-xs shadow-xl backdrop-blur">
                       <div className="mb-1 font-medium text-dark-text">{item.name}</div>
                       <div className="text-dark-muted">
-                        {formatCurrency(value)} ({((value / total) * 100).toFixed(1)}%)
+                        {formatCurrency(value, false, marketType)} ({((value / total) * 100).toFixed(1)}%)
                       </div>
                     </div>
                   )
@@ -261,7 +263,7 @@ export function AllocationPieChart({ data }: AllocationPieChartProps) {
                 </span>
               </div>
               <div className="mt-1 text-xs text-dark-muted">
-                {formatCurrency(item.value, true)}
+                {formatCurrency(item.value, true, marketType)}
               </div>
             </div>
           ))}
@@ -276,14 +278,15 @@ interface DailyPnlChartProps {
 }
 
 export function DailyPnlChart({ data }: DailyPnlChartProps) {
-  const { dailyHistory } = useApp()
+  const { dailyHistory, marketType } = useApp()
+  const copy = getDashboardCopy(marketType)
   const chartData = data || dailyHistory || []
 
   if (chartData.length === 0) {
     return (
       <EmptyState
-        title="Daily P&L"
-        message="No P&L data available"
+        title={copy.dailyPnlChart}
+        message={copy.noDailyPnl}
         height="h-[180px]"
       />
     )
@@ -294,15 +297,15 @@ export function DailyPnlChart({ data }: DailyPnlChartProps) {
   return (
     <div className="bg-dark-card border border-dark-border rounded-lg">
       <div className="px-4 py-3 border-b border-dark-border flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-dark-text">Daily P&L</h2>
-        <span className={`text-base font-bold ${totalPnl >= 0 ? 'text-profit' : 'text-loss'}`}>
-          {totalPnl >= 0 ? '+' : ''}{formatCurrency(totalPnl)}
+        <h2 className="text-sm font-semibold text-dark-text">{copy.dailyPnlChart}</h2>
+        <span className={`text-base font-bold ${getSignedTextClass(totalPnl, marketType)}`}>
+          {totalPnl >= 0 ? '+' : ''}{formatCurrency(totalPnl, false, marketType)}
         </span>
       </div>
       <div className="p-4">
         <div className="mb-3 flex items-center justify-between text-xs text-dark-muted">
-          <span>Intraday realized and unrealized movement</span>
-          <span>{chartData.length} points</span>
+          <span>{copy.intradayMovement}</span>
+          <span>{chartData.length} {copy.points}</span>
         </div>
         <div className="h-[180px]">
           <ResponsiveContainer width="100%" height="100%">
@@ -319,7 +322,7 @@ export function DailyPnlChart({ data }: DailyPnlChartProps) {
                 tickLine={false}
                 axisLine={false}
                 width={64}
-                tickFormatter={(value) => formatCurrency(value, true)}
+                tickFormatter={(value) => formatCurrency(value, true, marketType)}
               />
               <Tooltip
                 content={({ active, payload, label }) => {
@@ -330,8 +333,8 @@ export function DailyPnlChart({ data }: DailyPnlChartProps) {
                   return (
                     <div className="rounded-lg border border-dark-border bg-dark-card/95 px-3 py-2 text-xs shadow-xl backdrop-blur">
                       <div className="mb-1 font-medium text-dark-text">{label}</div>
-                      <div className={value >= 0 ? 'text-profit' : 'text-loss'}>
-                        {value >= 0 ? '+' : ''}{formatCurrency(value)}
+                      <div className={getSignedTextClass(value, marketType)}>
+                        {value >= 0 ? '+' : ''}{formatCurrency(value, false, marketType)}
                       </div>
                     </div>
                   )
@@ -339,7 +342,7 @@ export function DailyPnlChart({ data }: DailyPnlChartProps) {
               />
               <Bar dataKey="pnl" radius={[4, 4, 0, 0]}>
                 {chartData.map((entry, index) => (
-                  <Cell key={`${entry.time}-${index}`} fill={entry.pnl >= 0 ? PROFIT : LOSS} />
+                  <Cell key={`${entry.time}-${index}`} fill={getSignedFillColor(entry.pnl, marketType)} />
                 ))}
               </Bar>
             </BarChart>

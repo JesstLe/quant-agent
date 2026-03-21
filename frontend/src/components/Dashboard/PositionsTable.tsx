@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { useApp } from '../../hooks/useApp'
 import { formatCurrency, formatPercent, formatNumber } from '../../utils/formatters'
+import { getDashboardCopy, getSignedTextClass } from '../../utils/market'
 import type { Position } from '../../types'
 
 export function PositionsTable() {
-  const { portfolio, isLoading } = useApp()
+  const { portfolio, isLoading, marketType } = useApp()
   const [sortBy, setSortBy] = useState<keyof Position>('marketValue')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const copy = getDashboardCopy(marketType)
 
   if (isLoading) {
     return (
@@ -23,7 +25,7 @@ export function PositionsTable() {
   if (!portfolio || portfolio.positions.length === 0) {
     return (
       <div className="bg-dark-card border border-dark-border rounded-lg p-6 text-center text-dark-muted">
-        No positions found
+        {copy.noPositions}
       </div>
     )
   }
@@ -55,9 +57,11 @@ export function PositionsTable() {
   return (
     <div className="bg-dark-card border border-dark-border rounded-lg">
       <div className="px-4 py-3 border-b border-dark-border flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-dark-text">Positions</h2>
+        <h2 className="text-sm font-semibold text-dark-text">{copy.positions}</h2>
         <span className="text-xs text-dark-muted">
-          {portfolio.positions.length} {portfolio.positions.length === 1 ? 'position' : 'positions'}
+          {portfolio.positions.length} {marketType === 'A'
+            ? '只持仓'
+            : (portfolio.positions.length === 1 ? 'position' : 'positions')}
         </span>
       </div>
       <div className="overflow-x-auto">
@@ -68,30 +72,30 @@ export function PositionsTable() {
                 className="px-4 py-3 text-left cursor-pointer hover:text-dark-text"
                 onClick={() => handleSort('symbol')}
               >
-                Symbol <SortIndicator column="symbol" />
+                {copy.symbol} <SortIndicator column="symbol" />
               </th>
               <th
                 className="px-4 py-3 text-right cursor-pointer hover:text-dark-text"
                 onClick={() => handleSort('quantity')}
               >
-                Qty <SortIndicator column="quantity" />
+                {copy.quantity} <SortIndicator column="quantity" />
               </th>
-              <th className="px-4 py-3 text-right">Avg Price</th>
-              <th className="px-4 py-3 text-right">Current</th>
+              <th className="px-4 py-3 text-right">{copy.avgPrice}</th>
+              <th className="px-4 py-3 text-right">{copy.current}</th>
               <th
                 className="px-4 py-3 text-right cursor-pointer hover:text-dark-text"
                 onClick={() => handleSort('pnlPercent')}
               >
-                P&L <SortIndicator column="pnlPercent" />
+                {copy.pnl} <SortIndicator column="pnlPercent" />
               </th>
-              <th className="px-4 py-3 text-right">Day</th>
+              <th className="px-4 py-3 text-right">{copy.day}</th>
               <th
                 className="px-4 py-3 text-right cursor-pointer hover:text-dark-text"
                 onClick={() => handleSort('marketValue')}
               >
-                Value <SortIndicator column="marketValue" />
+                {copy.value} <SortIndicator column="marketValue" />
               </th>
-              <th className="px-4 py-3 text-right">Weight</th>
+              <th className="px-4 py-3 text-right">{copy.weight}</th>
             </tr>
           </thead>
           <tbody>
@@ -109,18 +113,18 @@ export function PositionsTable() {
                   </div>
                 </td>
                 <td className="px-4 py-3 text-right text-dark-muted">
-                  {formatNumber(position.quantity)}
+                  {formatNumber(position.quantity, false, marketType)}
                 </td>
                 <td className="px-4 py-3 text-right text-dark-muted">
-                  {formatCurrency(position.avgPrice)}
+                  {formatCurrency(position.avgPrice, false, marketType)}
                 </td>
                 <td className="px-4 py-3 text-right text-dark-text font-medium">
-                  {formatCurrency(position.currentPrice)}
+                  {formatCurrency(position.currentPrice, false, marketType)}
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <div className={position.pnl >= 0 ? 'text-profit' : 'text-loss'}>
+                  <div className={getSignedTextClass(position.pnl, marketType)}>
                     <div className="font-medium">
-                      {position.pnl >= 0 ? '+' : ''}{formatCurrency(position.pnl)}
+                      {position.pnl >= 0 ? '+' : ''}{formatCurrency(position.pnl, false, marketType)}
                     </div>
                     <div className="text-xs">
                       ({position.pnlPercent >= 0 ? '+' : ''}{formatPercent(position.pnlPercent)})
@@ -128,12 +132,12 @@ export function PositionsTable() {
                   </div>
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <span className={`${position.dayChange >= 0 ? 'text-profit' : 'text-loss'}`}>
+                  <span className={getSignedTextClass(position.dayChange, marketType)}>
                     {position.dayChange >= 0 ? '+' : ''}{formatPercent(position.dayChangePercent)}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-right text-dark-text font-medium">
-                  {formatCurrency(position.marketValue, true)}
+                  {formatCurrency(position.marketValue, true, marketType)}
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-2">
@@ -153,24 +157,24 @@ export function PositionsTable() {
           </tbody>
           <tfoot>
             <tr className="bg-dark-hover text-sm font-medium">
-              <td className="px-4 py-3 text-dark-text">Total</td>
+              <td className="px-4 py-3 text-dark-text">{copy.total}</td>
               <td className="px-4 py-3 text-right text-dark-muted">
-                {formatNumber(portfolio.positions.reduce((sum, p) => sum + p.quantity, 0))}
+                {formatNumber(portfolio.positions.reduce((sum, p) => sum + p.quantity, 0), false, marketType)}
               </td>
               <td className="px-4 py-3"></td>
               <td className="px-4 py-3"></td>
               <td className="px-4 py-3 text-right">
-                <span className={portfolio.totalPnl >= 0 ? 'text-profit' : 'text-loss'}>
-                  {portfolio.totalPnl >= 0 ? '+' : ''}{formatCurrency(portfolio.totalPnl)}
+                <span className={getSignedTextClass(portfolio.totalPnl, marketType)}>
+                  {portfolio.totalPnl >= 0 ? '+' : ''}{formatCurrency(portfolio.totalPnl, false, marketType)}
                 </span>
               </td>
               <td className="px-4 py-3 text-right">
-                <span className={portfolio.dayPnl >= 0 ? 'text-profit' : 'text-loss'}>
+                <span className={getSignedTextClass(portfolio.dayPnl, marketType)}>
                   {formatPercent(portfolio.dayPnlPercent)}
                 </span>
               </td>
               <td className="px-4 py-3 text-right text-dark-text">
-                {formatCurrency(portfolio.investedValue, true)}
+                {formatCurrency(portfolio.investedValue, true, marketType)}
               </td>
               <td className="px-4 py-3 text-right text-dark-muted">100%</td>
             </tr>

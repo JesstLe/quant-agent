@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useApp } from '../../hooks/useApp'
-import { formatPercent, formatRelativeTime } from '../../utils/formatters'
+import { formatCurrency, formatPercent, formatRelativeTime } from '../../utils/formatters'
+import { getDashboardCopy, getSignedTextClass, localizeAgentName, localizeSignalStatus, localizeSignalType } from '../../utils/market'
 import type { SignalType, SignalStatus } from '../../types'
 
 const typeStyles: Record<SignalType, string> = {
@@ -25,10 +26,11 @@ const confidenceColor = (confidence: number): string => {
 }
 
 export function SignalsPanel() {
-  const { signals, isLoading, reviewSignal } = useApp()
+  const { signals, isLoading, reviewSignal, marketType } = useApp()
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [pendingActionId, setPendingActionId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const copy = getDashboardCopy(marketType)
 
   const handleReview = async (signalId: string, action: 'approve' | 'reject') => {
     setPendingActionId(signalId)
@@ -37,7 +39,7 @@ export function SignalsPanel() {
     try {
       await reviewSignal(signalId, action)
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Failed to update signal')
+      setActionError(error instanceof Error ? error.message : (marketType === 'A' ? '更新信号失败' : 'Failed to update signal'))
     } finally {
       setPendingActionId(null)
     }
@@ -61,7 +63,7 @@ export function SignalsPanel() {
         <svg className="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
         </svg>
-        No signals generated yet
+        {copy.noSignals}
       </div>
     )
   }
@@ -69,9 +71,9 @@ export function SignalsPanel() {
   return (
     <div className="bg-dark-card border border-dark-border rounded-lg">
       <div className="px-4 py-3 border-b border-dark-border flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-dark-text">Recent Signals</h2>
+        <h2 className="text-sm font-semibold text-dark-text">{copy.recentSignals}</h2>
         <span className="text-xs text-dark-muted">
-          {signals.filter(s => s.status === 'PENDING').length} pending
+          {signals.filter(s => s.status === 'PENDING').length} {copy.pending}
         </span>
       </div>
       {actionError && (
@@ -95,14 +97,14 @@ export function SignalsPanel() {
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-3">
                     <span className={`px-2 py-0.5 text-xs font-semibold rounded border ${typeStyles[signal.type]}`}>
-                      {signal.type}
+                      {localizeSignalType(signal.type, marketType)}
                     </span>
                     <span className="font-medium text-dark-text">{signal.symbol}</span>
-                    <span className="text-xs text-dark-muted">by {signal.agentSource}</span>
+                    <span className="text-xs text-dark-muted">{copy.by} {localizeAgentName(signal.agentSource, marketType)}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`px-2 py-0.5 text-xs rounded ${statusStyles[signal.status]}`}>
-                      {signal.status}
+                      {localizeSignalStatus(signal.status, marketType)}
                     </span>
                     <svg
                       className={`w-4 h-4 text-dark-muted transition-transform ${isExpanded ? 'rotate-180' : ''}`}
@@ -119,13 +121,13 @@ export function SignalsPanel() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4 text-xs">
                     <span className="text-dark-muted">
-                      Entry: <span className="text-dark-text">${signal.entryPrice.toFixed(2)}</span>
+                      {copy.entry}: <span className="text-dark-text">{formatCurrency(signal.entryPrice, false, marketType)}</span>
                     </span>
                     <span className="text-dark-muted">
-                      Target: <span className="text-profit">${signal.targetPrice.toFixed(2)}</span>
+                      {copy.target}: <span className={getSignedTextClass(1, marketType)}>{formatCurrency(signal.targetPrice, false, marketType)}</span>
                     </span>
                     <span className="text-dark-muted">
-                      Stop: <span className="text-loss">${signal.stopLoss.toFixed(2)}</span>
+                      {copy.stop}: <span className={getSignedTextClass(-1, marketType)}>{formatCurrency(signal.stopLoss, false, marketType)}</span>
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -148,7 +150,7 @@ export function SignalsPanel() {
                   <div className="pt-3 space-y-3">
                     {/* Rationale */}
                     <div>
-                      <div className="text-xs text-dark-muted mb-1">Rationale</div>
+                      <div className="text-xs text-dark-muted mb-1">{copy.rationale}</div>
                       <p className="text-sm text-dark-text">{signal.rationale}</p>
                     </div>
 
@@ -156,15 +158,15 @@ export function SignalsPanel() {
                     <div className="grid grid-cols-3 gap-4 text-xs">
                       {signal.expectedReturn && (
                         <div>
-                          <span className="text-dark-muted">Expected Return</span>
-                          <div className={`font-medium ${signal.expectedReturn >= 0 ? 'text-profit' : 'text-loss'}`}>
+                          <span className="text-dark-muted">{copy.expectedReturn}</span>
+                          <div className={`font-medium ${getSignedTextClass(signal.expectedReturn, marketType)}`}>
                             {formatPercent(signal.expectedReturn)}
                           </div>
                         </div>
                       )}
                       {signal.riskScore && (
                         <div>
-                          <span className="text-dark-muted">Risk Score</span>
+                          <span className="text-dark-muted">{copy.riskScore}</span>
                           <div className="font-medium text-dark-text">
                             {signal.riskScore.toFixed(1)}/10
                           </div>
@@ -172,7 +174,7 @@ export function SignalsPanel() {
                       )}
                       {signal.quantity && (
                         <div>
-                          <span className="text-dark-muted">Suggested Qty</span>
+                          <span className="text-dark-muted">{copy.suggestedQty}</span>
                           <div className="font-medium text-dark-text">{signal.quantity}</div>
                         </div>
                       )}
@@ -181,7 +183,7 @@ export function SignalsPanel() {
                     {/* Footer */}
                     <div className="flex items-center justify-between pt-2 border-t border-dark-border">
                       <span className="text-xs text-dark-muted">
-                        {formatRelativeTime(signal.timestamp)}
+                        {formatRelativeTime(signal.timestamp, marketType)}
                       </span>
                       {signal.status === 'PENDING' && (
                         <div className="flex gap-2">
@@ -193,7 +195,7 @@ export function SignalsPanel() {
                               void handleReview(signal.id, 'reject')
                             }}
                           >
-                            Reject
+                            {copy.reject}
                           </button>
                           <button
                             className="px-3 py-1 text-xs bg-profit/20 text-profit rounded hover:bg-profit/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -203,7 +205,7 @@ export function SignalsPanel() {
                               void handleReview(signal.id, 'approve')
                             }}
                           >
-                            {pendingActionId === signal.id ? 'Working...' : 'Approve'}
+                            {pendingActionId === signal.id ? copy.working : copy.approve}
                           </button>
                         </div>
                       )}

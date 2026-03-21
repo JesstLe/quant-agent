@@ -1,8 +1,10 @@
 import { useApp } from '../../hooks/useApp'
 import { formatCurrency, formatPercent, formatRelativeTime } from '../../utils/formatters'
+import { getDashboardCopy, getSignedTextClass } from '../../utils/market'
 
 export function PortfolioSummary() {
-  const { portfolio, riskMetrics, lastUpdate, isLoading } = useApp()
+  const { portfolio, riskMetrics, lastUpdate, isLoading, marketType } = useApp()
+  const copy = getDashboardCopy(marketType)
 
   if (isLoading) {
     return (
@@ -19,38 +21,40 @@ export function PortfolioSummary() {
   if (!portfolio) {
     return (
       <div className="bg-dark-card border border-dark-border rounded-lg p-6 text-center text-dark-muted">
-        No portfolio data available
+        {copy.noPortfolio}
       </div>
     )
   }
 
   const metrics = [
     {
-      label: 'Total Value',
-      value: formatCurrency(portfolio.totalValue, true),
-      subValue: formatCurrency(portfolio.dayPnl),
-      subLabel: 'Day P&L',
-      isPositive: portfolio.dayPnl >= 0,
+      label: copy.totalValue,
+      value: formatCurrency(portfolio.totalValue, true, marketType),
+      subValue: formatCurrency(portfolio.dayPnl, false, marketType),
+      subLabel: copy.dayPnl,
+      signalValue: portfolio.dayPnl,
     },
     {
-      label: 'Day Return',
+      label: copy.dayReturn,
       value: formatPercent(portfolio.dayPnlPercent),
       subValue: formatPercent(portfolio.weekPnlPercent),
-      subLabel: 'Week',
-      isPositive: portfolio.dayPnlPercent >= 0,
+      subLabel: copy.week,
+      signalValue: portfolio.dayPnlPercent,
     },
     {
-      label: 'Sharpe Ratio',
+      label: copy.sharpeRatio,
       value: portfolio.sharpeRatio.toFixed(2),
       subValue: `${portfolio.winRate.toFixed(1)}%`,
-      subLabel: 'Win Rate',
+      subLabel: copy.winRate,
+      signalValue: portfolio.sharpeRatio,
       isPositive: portfolio.sharpeRatio >= 1,
     },
     {
-      label: 'Max Drawdown',
+      label: copy.maxDrawdown,
       value: formatPercent(portfolio.maxDrawdown),
-      subValue: riskMetrics ? `Risk: ${riskMetrics.overallRiskScore}/10` : 'Risk: --',
-      subLabel: 'Risk Score',
+      subValue: riskMetrics ? `${copy.riskScore}: ${riskMetrics.overallRiskScore}/10` : `${copy.riskScore}: --`,
+      subLabel: copy.riskScore,
+      signalValue: portfolio.maxDrawdown,
       isPositive: portfolio.maxDrawdown >= -5,
       invertColors: true,
     },
@@ -59,10 +63,10 @@ export function PortfolioSummary() {
   return (
     <div className="bg-dark-card border border-dark-border rounded-lg">
       <div className="px-4 py-3 border-b border-dark-border flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-dark-text">Portfolio Overview</h2>
+        <h2 className="text-sm font-semibold text-dark-text">{copy.portfolioOverview}</h2>
         {lastUpdate && (
           <span className="text-xs text-dark-muted">
-            Updated {formatRelativeTime(lastUpdate)}
+            {copy.updated} {formatRelativeTime(lastUpdate, marketType)}
           </span>
         )}
       </div>
@@ -73,14 +77,16 @@ export function PortfolioSummary() {
               <div className="text-xs text-dark-muted uppercase tracking-wider mb-2">
                 {metric.label}
               </div>
-              <div className={`text-2xl font-bold ${metric.isPositive ? 'text-profit' : 'text-loss'}`}>
+              <div className={`text-2xl font-bold ${metric.invertColors
+                ? (metric.isPositive ? 'text-profit' : 'text-loss')
+                : getSignedTextClass(metric.signalValue ?? 0, marketType)}`}>
                 {metric.value}
               </div>
               <div className="flex items-center justify-between mt-2 text-xs">
                 <span className="text-dark-muted">{metric.subLabel}:</span>
                 <span className={metric.invertColors
                   ? (metric.isPositive ? 'text-profit' : 'text-loss')
-                  : (parseFloat(metric.subValue.replace(/[^0-9.-]/g, '')) >= 0 ? 'text-profit' : 'text-loss')}>
+                  : getSignedTextClass(parseFloat(metric.subValue.replace(/[^0-9.-]/g, '')) || 0, marketType)}>
                   {metric.subValue}
                 </span>
               </div>
@@ -93,25 +99,25 @@ export function PortfolioSummary() {
           <div className="flex items-center justify-between text-sm">
             <div className="flex items-center gap-6">
               <div>
-                <span className="text-dark-muted">Invested: </span>
+                <span className="text-dark-muted">{copy.invested}: </span>
                 <span className="text-dark-text font-medium">
-                  {formatCurrency(portfolio.investedValue, true)}
+                  {formatCurrency(portfolio.investedValue, true, marketType)}
                 </span>
               </div>
               <div>
-                <span className="text-dark-muted">Cash: </span>
+                <span className="text-dark-muted">{copy.cash}: </span>
                 <span className="text-dark-text font-medium">
-                  {formatCurrency(portfolio.cashBalance, true)}
+                  {formatCurrency(portfolio.cashBalance, true, marketType)}
                 </span>
               </div>
               <div>
-                <span className="text-dark-muted">Positions: </span>
+                <span className="text-dark-muted">{copy.positions}: </span>
                 <span className="text-dark-text font-medium">{portfolio.positions.length}</span>
               </div>
             </div>
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-profit animate-pulse"></span>
-              <span className="text-xs text-dark-muted">Live</span>
+              <span className="text-xs text-dark-muted">{copy.live}</span>
             </div>
           </div>
         </div>

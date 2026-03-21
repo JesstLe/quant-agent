@@ -1,5 +1,6 @@
 import { useApp } from '../../hooks/useApp'
 import { formatRelativeTime } from '../../utils/formatters'
+import { getDashboardCopy, localizeAgentName, localizeAgentRole, localizeAgentStatus, localizeAgentTask, localizeLogMessage } from '../../utils/market'
 import type { AgentStatus } from '../../types'
 
 const statusStyles: Record<AgentStatus, { dot: string; text: string; bg: string }> = {
@@ -38,7 +39,8 @@ const agentIcons: Record<string, JSX.Element> = {
 }
 
 export function AgentsPanel() {
-  const { agents, logs, isLoading } = useApp()
+  const { agents, logs, isLoading, marketType } = useApp()
+  const copy = getDashboardCopy(marketType)
 
   if (isLoading) {
     return (
@@ -55,10 +57,10 @@ export function AgentsPanel() {
   return (
     <div className="bg-dark-card border border-dark-border rounded-lg">
       <div className="px-4 py-3 border-b border-dark-border flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-dark-text">Agent Monitor</h2>
+        <h2 className="text-sm font-semibold text-dark-text">{copy.agentMonitor}</h2>
         <div className="flex items-center gap-1">
           <span className="w-2 h-2 rounded-full bg-profit animate-pulse"></span>
-          <span className="text-xs text-dark-muted">System Active</span>
+          <span className="text-xs text-dark-muted">{copy.systemActive}</span>
         </div>
       </div>
       <div className="p-4">
@@ -77,26 +79,26 @@ export function AgentsPanel() {
                   <div className="flex items-center gap-2">
                     <div className={`${styles.text}`}>{icon}</div>
                     <div>
-                      <div className="font-medium text-dark-text text-sm">{agent.name}</div>
+                      <div className="font-medium text-dark-text text-sm">{localizeAgentName(agent.name, marketType)}</div>
                       <div className="text-xs text-dark-muted capitalize">
-                        {agent.role.replace('_', ' ')}
+                        {localizeAgentRole(agent.role, marketType)}
                       </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <span className={`w-1.5 h-1.5 rounded-full ${styles.dot}`}></span>
-                    <span className={`text-xs ${styles.text} capitalize`}>{agent.status}</span>
+                    <span className={`text-xs ${styles.text} capitalize`}>{localizeAgentStatus(agent.status, marketType)}</span>
                   </div>
                 </div>
 
                 {/* Stats */}
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div>
-                    <span className="text-dark-muted">Tasks: </span>
+                    <span className="text-dark-muted">{copy.tasks}: </span>
                     <span className="text-dark-text">{agent.taskCount}</span>
                   </div>
                   <div>
-                    <span className="text-dark-muted">Success: </span>
+                    <span className="text-dark-muted">{copy.success}: </span>
                     <span className={agent.successRate >= 90 ? 'text-profit' : agent.successRate >= 70 ? 'text-warning' : 'text-loss'}>
                       {agent.successRate.toFixed(0)}%
                     </span>
@@ -107,7 +109,7 @@ export function AgentsPanel() {
                 {agent.currentTask && (
                   <div className="mt-2 pt-2 border-t border-dark-border/50">
                     <div className="text-xs text-dark-muted truncate">
-                      {agent.currentTask}
+                      {localizeAgentTask(agent.currentTask, marketType)}
                     </div>
                   </div>
                 )}
@@ -118,7 +120,7 @@ export function AgentsPanel() {
 
         {/* Recent Activity Log */}
         <div className="border-t border-dark-border pt-4">
-          <div className="text-xs text-dark-muted uppercase tracking-wider mb-2">Activity Log</div>
+          <div className="text-xs text-dark-muted uppercase tracking-wider mb-2">{copy.activityLog}</div>
           <div className="space-y-2 max-h-32 overflow-y-auto">
             {logs.slice(0, 5).map((log) => (
               <div key={log.id} className="flex items-start gap-2 text-xs">
@@ -128,11 +130,11 @@ export function AgentsPanel() {
                   log.level === 'warning' ? 'bg-warning' : 'bg-info'
                 }`}></span>
                 <div className="flex-1 min-w-0">
-                  <span className="text-dark-muted">[{log.agentName}]</span>{' '}
-                  <span className="text-dark-text">{log.message}</span>
+                  <span className="text-dark-muted">[{localizeAgentName(log.agentName, marketType)}]</span>{' '}
+                  <span className="text-dark-text">{localizeLogMessage(log.message, marketType)}</span>
                 </div>
                 <span className="text-dark-muted flex-shrink-0">
-                  {formatRelativeTime(log.timestamp)}
+                  {formatRelativeTime(log.timestamp, marketType)}
                 </span>
               </div>
             ))}

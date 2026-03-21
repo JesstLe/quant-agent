@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode } from 'react'
 import type {
   Market,
   PortfolioMetrics,
@@ -11,26 +11,6 @@ import type {
   HistoricalDataPoint,
   DailyHistoryPoint,
 } from '../types'
-import {
-  mockMarketsUS,
-  mockMarketsA,
-  mockPortfolioUS,
-  mockPortfolioA,
-  mockSignalsUS,
-  mockSignalsA,
-  mockAgents,
-  mockTradesUS,
-  mockTradesA,
-  mockRiskMetrics,
-  mockRiskAlertsUS,
-  mockRiskAlertsA,
-  mockAgentLogsUS,
-  mockAgentLogsA,
-  mockHistoricalDataUS,
-  mockHistoricalDataA,
-  mockDailyHistoryUS,
-  mockDailyHistoryA,
-} from '../data/mockData'
 
 export type MarketType = 'A' | 'US'
 
@@ -73,6 +53,56 @@ export function useApp() {
 }
 
 // ============================================================
+// API Client
+// ============================================================
+
+class ApiClient {
+  private baseUrl: string
+
+  constructor(baseUrl: string = 'http://localhost:8000') {
+    this.baseUrl = baseUrl
+  }
+
+  async get<T>(endpoint: string): Promise<T> {
+    const response = await fetch(`${this.baseUrl}${endpoint}`)
+    if (!response.ok) throw new Error(`API Error: ${response.statusText}`)
+    return response.json()
+  }
+
+  async post<T>(endpoint: string, data: unknown): Promise<T> {
+    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!response.ok) throw new Error(`API Error: ${response.statusText}`)
+    return response.json()
+  }
+
+  connectWebSocket(
+    market: MarketType,
+    onMessage: (data: unknown) => void,
+    onError?: () => void,
+  ): WebSocket | null {
+    try {
+      const ws = new WebSocket(`ws://localhost:8000/ws?market=${encodeURIComponent(market)}`)
+      ws.onmessage = (event) => {
+        try {
+          onMessage(JSON.parse(event.data))
+        } catch {
+          console.error('Failed to parse WebSocket message')
+        }
+      }
+      ws.onerror = () => onError?.()
+      return ws
+    } catch {
+      console.warn('Failed to create WebSocket connection')
+      return null
+    }
+  }
+}
+
+// ============================================================
 // Provider
 // ============================================================
 
@@ -81,40 +111,12 @@ interface AppProviderProps {
   initialMarketType?: MarketType
 }
 
-const getMarketData = (marketType: MarketType) => {
-  switch (marketType) {
-    case 'A':
-      return {
-        markets: mockMarketsA,
-        portfolio: mockPortfolioA,
-        signals: mockSignalsA,
-        trades: mockTradesA,
-        alerts: mockRiskAlertsA,
-        logs: mockAgentLogsA,
-        historicalData: mockHistoricalDataA,
-        dailyHistory: mockDailyHistoryA,
-      }
-    case 'US':
-    default:
-      return {
-        markets: mockMarketsUS,
-        portfolio: mockPortfolioUS,
-        signals: mockSignalsUS,
-        trades: mockTradesUS,
-        alerts: mockRiskAlertsUS,
-        logs: mockAgentLogsUS,
-        historicalData: mockHistoricalDataUS,
-        dailyHistory: mockDailyHistoryUS,
-      }
-  }
-}
-
 export function AppProvider({ children, initialMarketType = 'US' }: AppProviderProps) {
   // State
   const [portfolio, setPortfolio] = useState<PortfolioMetrics | null>(null)
   const [markets, setMarkets] = useState<Market[]>([])
   const [signals, setSignals] = useState<Signal[]>([])
-  const [agents] = useState<Agent[]>(mockAgents)
+  const [agents, setAgents] = useState<Agent[]>([])
   const [trades, setTrades] = useState<Trade[]>([])
   const [riskMetrics, setRiskMetrics] = useState<RiskMetrics | null>(null)
   const [alerts, setAlerts] = useState<RiskAlert[]>([])
@@ -125,43 +127,100 @@ export function AppProvider({ children, initialMarketType = 'US' }: AppProviderP
   const [error, setError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [marketType, setMarketTypeState] = useState<MarketType>(initialMarketType)
+  const requestIdRef = useRef(0)
 
-  // Load data based on market type
-  const loadData = useCallback((type: MarketType) => {
-    const data = getMarketData(type)
-    setPortfolio(data.portfolio)
-    setMarkets(data.markets)
-    setSignals(data.signals)
-    setTrades(data.trades)
-    setRiskMetrics(mockRiskMetrics)
-    setAlerts(data.alerts)
-    setLogs(data.logs)
-    setHistoricalData(data.historicalData)
-    setDailyHistory(data.dailyHistory)
-    setLastUpdate(new Date())
+  const api = useCallback(() => new ApiClient(), [])
+
+  // Load real data from API
+  const loadData = useCallback(async () => {
+    const requestId = ++requestIdRef.current
+    setIsLoading(true)
     setError(null)
-    setIsLoading(false)
-  }, [])
+    try {
+      const client = api()
+      const [
+        portfolioData,
+        marketsData,
+        signalsData,
+        agentsData,
+        tradesData,
+        riskData,
+        alertsData,
+        logsData,
+        historicalDataResponse,
+        dailyHistoryResponse,
+      ] = await Promise.all([
+        client.get<PortfolioMetrics>(`/api/portfolio?market=${marketType}`),
+        client.get<Market[]>(`/api/markets?market=${marketType}`),
+        client.get<Signal[]>(`/api/signals?market=${marketType}`),
+        client.get<Agent[]>(`/api/agents?market=${marketType}`),
+        client.get<Trade[]>(`/api/trades?market=${marketType}`),
+        client.get<RiskMetrics>(`/api/risk?market=${marketType}`),
+        client.get<RiskAlert[]>(`/api/alerts?market=${marketType}`),
+        client.get<AgentLog[]>(`/api/logs?market=${marketType}`),
+        client.get<HistoricalDataPoint[]>(`/api/historical?market=${marketType}`),
+        client.get<DailyHistoryPoint[]>(`/api/daily-history?market=${marketType}`),
+      ])
+      if (requestId !== requestIdRef.current) {
+        return
+      }
+      setPortfolio(portfolioData)
+      setMarkets(marketsData)
+      setSignals(signalsData)
+      setAgents(agentsData)
+      setTrades(tradesData)
+      setRiskMetrics(riskData)
+      setAlerts(alertsData)
+      setLogs(logsData)
+      setHistoricalData(historicalDataResponse)
+      setDailyHistory(dailyHistoryResponse)
+      setLastUpdate(new Date())
+    } catch (err) {
+      if (requestId !== requestIdRef.current) {
+        return
+      }
+      const errorMsg = err instanceof Error ? err.message : 'Failed to fetch data'
+      setError(errorMsg)
+      console.error('API unavailable:', errorMsg)
+    } finally {
+      if (requestId === requestIdRef.current) {
+        setIsLoading(false)
+      }
+    }
+  }, [api, marketType])
 
   // Refresh data
   const refresh = useCallback(async () => {
-    // 使用mock数据，模拟动态变化
-    loadData(marketType)
-  }, [marketType, loadData])
+    try {
+      const client = api()
+      await client.post(`/api/refresh?market=${marketType}`, {})
+    } catch (err) {
+      console.warn('Refresh trigger failed, falling back to direct reload', err)
+    }
+    await loadData()
+  }, [api, loadData, marketType])
 
   // Toggle market type
   const setMarketType = useCallback((type: MarketType) => {
     setMarketTypeState(type)
-    loadData(type)
-  }, [loadData])
+  }, [])
 
   const reviewSignal = useCallback(async (signalId: string, action: 'approve' | 'reject') => {
-    const nextStatus = action === 'approve' ? 'APPROVED' : 'REJECTED'
-    setSignals(prev => prev.map(signal => (
-      signal.id === signalId ? { ...signal, status: nextStatus } : signal
-    )))
-    setLastUpdate(new Date())
-  }, [])
+    try {
+      const client = api()
+      const updatedSignal = await client.post<Signal>(
+        `/api/signals/${signalId}/${action}?market=${marketType}`,
+        {},
+      )
+      setSignals(prev => prev.map(signal => (
+        signal.id === signalId ? updatedSignal : signal
+      )))
+      setLastUpdate(new Date())
+    } catch (err) {
+      console.error('Failed to review signal:', err)
+      setError(err instanceof Error ? err.message : 'Failed to review signal')
+    }
+  }, [api, marketType])
 
   // Acknowledge alert
   const acknowledgeAlert = useCallback((alertId: string) => {
@@ -170,8 +229,75 @@ export function AppProvider({ children, initialMarketType = 'US' }: AppProviderP
 
   // Initial load
   useEffect(() => {
-    loadData(marketType)
-  }, [marketType, loadData])
+    loadData()
+  }, [loadData])
+
+  // WebSocket connection for real-time updates
+  useEffect(() => {
+    let isActive = true
+    let ws: WebSocket | null = null
+    const connectTimer = window.setTimeout(() => {
+      if (!isActive) {
+        return
+      }
+
+      ws = api().connectWebSocket(
+        marketType,
+        (data: unknown) => {
+          if (!isActive) {
+            return
+          }
+          const typedData = data as { type: string; payload: unknown }
+          switch (typedData.type) {
+            case 'portfolio':
+              setPortfolio(typedData.payload as PortfolioMetrics)
+              break
+            case 'markets':
+              setMarkets(typedData.payload as Market[])
+              break
+            case 'signals':
+              setSignals(Array.isArray(typedData.payload)
+                ? typedData.payload as Signal[]
+                : prev => [typedData.payload as Signal, ...prev])
+              break
+            case 'agents':
+              setAgents(typedData.payload as Agent[])
+              break
+            case 'trades':
+              setTrades(Array.isArray(typedData.payload)
+                ? typedData.payload as Trade[]
+                : prev => [typedData.payload as Trade, ...prev])
+              break
+            case 'risk':
+              setRiskMetrics(typedData.payload as RiskMetrics)
+              break
+            case 'alerts':
+              setAlerts(Array.isArray(typedData.payload)
+                ? typedData.payload as RiskAlert[]
+                : prev => [typedData.payload as RiskAlert, ...prev])
+              break
+            case 'logs':
+              setLogs(Array.isArray(typedData.payload)
+                ? typedData.payload as AgentLog[]
+                : prev => [typedData.payload as AgentLog, ...prev.slice(0, 99)])
+              break
+          }
+          setLastUpdate(new Date())
+        },
+        () => {
+          if (isActive) {
+            console.warn('WebSocket connection error')
+          }
+        },
+      )
+    }, 0)
+
+    return () => {
+      isActive = false
+      window.clearTimeout(connectTimer)
+      ws?.close()
+    }
+  }, [api, marketType])
 
   const contextValue: AppContextType = {
     portfolio,

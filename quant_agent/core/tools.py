@@ -1,11 +1,40 @@
 """Tools available to agents."""
 
 from abc import ABC, abstractmethod
+from datetime import datetime, timedelta
 from typing import Any
-import yfinance as yf
+
+try:
+    import akshare as ak
+except ImportError:  # pragma: no cover - optional dependency
+    ak = None
 import pandas as pd
+import yfinance as yf
 
 from quant_agent.core.memory import AgentMemory, MemoryType
+
+
+def _is_a_stock(symbol: str) -> bool:
+    """判断是否为A股股票代码"""
+    return symbol.endswith('.SS') or symbol.endswith('.SZ') or symbol.isdigit()
+
+
+def _convert_a_stock_code(symbol: str) -> str:
+    """转换A股代码为akshare需要的格式"""
+    if symbol.endswith('.SS'):
+        return symbol.replace('.SS', '')
+    elif symbol.endswith('.SZ'):
+        return symbol.replace('.SZ', '')
+    else:
+        return symbol
+
+
+def _to_serializable_records(df: pd.DataFrame) -> list[dict[str, Any]]:
+    normalized = df.copy()
+    for column in normalized.columns:
+        if pd.api.types.is_datetime64_any_dtype(normalized[column]):
+            normalized[column] = normalized[column].astype(str)
+    return normalized.to_dict(orient="records")
 
 
 class Tool(ABC):
@@ -43,23 +72,32 @@ class GetMarketDataTool(Tool):
     async def execute(
         self,
         symbol: str,
-        period: str = "1mo",
+        period: str = "3mo",
         interval: str = "1d",
     ) -> dict[str, Any]:
-        """Fetch market data from Yahoo Finance."""
-        ticker = yf.Ticker(symbol)
-        df = ticker.history(period=period, interval=interval)
+        """Fetch market data from Yahoo Finance for both A-shares and US equities."""
+        try:
+            ticker = yf.Ticker(symbol)
+            df = ticker.history(period=period, interval=interval, auto_adjust=False)
+            if df.empty:
+                return {"error": f"No data found for {symbol}"}
 
-        if df.empty:
-            return {"error": f"No data found for {symbol}"}
+            df = df.reset_index()
+            date_column = "Datetime" if "Datetime" in df.columns else "Date"
+            if date_column in df.columns:
+                df[date_column] = pd.to_datetime(df[date_column]).astype(str)
+                if date_column != "Date":
+                    df = df.rename(columns={date_column: "Date"})
 
-        return {
-            "symbol": symbol,
-            "period": period,
-            "interval": interval,
-            "data": df.reset_index().to_dict(orient="records"),
-            "columns": list(df.columns),
-        }
+            return {
+                "symbol": symbol,
+                "period": period,
+                "interval": interval,
+                "data": _to_serializable_records(df),
+                "columns": list(df.columns),
+            }
+        except Exception as e:
+            return {"error": f"Failed to fetch data for {symbol}: {str(e)}"}
 
 
 class GetStockInfoTool(Tool):
@@ -75,23 +113,27 @@ class GetStockInfoTool(Tool):
 
     async def execute(self, symbol: str) -> dict[str, Any]:
         """Get stock information."""
-        ticker = yf.Ticker(symbol)
-        info = ticker.info
+        try:
+            ticker = yf.Ticker(symbol)
+            info = ticker.info or {}
+            name = info.get("longName") or info.get("shortName") or symbol
 
-        return {
-            "symbol": symbol,
-            "name": info.get("longName", ""),
-            "sector": info.get("sector", ""),
-            "industry": info.get("industry", ""),
-            "market_cap": info.get("marketCap", 0),
-            "pe_ratio": info.get("trailingPE", 0),
-            "forward_pe": info.get("forwardPE", 0),
-            "dividend_yield": info.get("dividendYield", 0),
-            "beta": info.get("beta", 0),
-            "52_week_high": info.get("fiftyTwoWeekHigh", 0),
-            "52_week_low": info.get("fiftyTwoWeekLow", 0),
-            "avg_volume": info.get("averageVolume", 0),
-        }
+            return {
+                "symbol": symbol,
+                "name": name,
+                "sector": info.get("sector", ""),
+                "industry": info.get("industry", ""),
+                "market_cap": info.get("marketCap", 0),
+                "pe_ratio": info.get("trailingPE", 0),
+                "forward_pe": info.get("forwardPE", 0),
+                "dividend_yield": info.get("dividendYield", 0),
+                "beta": info.get("beta", 0),
+                "52_week_high": info.get("fiftyTwoWeekHigh", 0),
+                "52_week_low": info.get("fiftyTwoWeekLow", 0),
+                "avg_volume": info.get("averageVolume", 0),
+            }
+        except Exception as e:
+            return {"symbol": symbol, "error": str(e)}
 
 
 class CalculateIndicatorsTool(Tool):
@@ -156,22 +198,23 @@ class AnalyzeSentimentTool(Tool):
 
     async def execute(self, symbol: str) -> dict[str, Any]:
         """Analyze sentiment for a symbol."""
-        ticker = yf.Ticker(symbol)
-        news = ticker.news
+        try:
+            ticker = yf.Ticker(symbol)
+            news = ticker.news
+        except Exception as e:
+            return {"symbol": symbol, "sentiment": "neutral", "score": 0.5, "articles": [], "error": str(e)}
 
         if not news:
             return {"symbol": symbol, "sentiment": "neutral", "score": 0.5, "articles": []}
 
-        # Simple sentiment analysis based on news titles
-        # In production, use proper NLP models
-        positive_words = ["buy", "upgrade", "bullish", "gain", "rise", "positive", "growth"]
-        negative_words = ["sell", "downgrade", "bearish", "loss", "fall", "negative", "decline"]
+        positive_words = ["buy", "upgrade", "bullish", "gain", "rise", "positive", "growth", "beat", "strong"]
+        negative_words = ["sell", "downgrade", "bearish", "loss", "fall", "negative", "decline", "miss", "weak"]
 
         total_score = 0
         articles = []
 
         for article in news[:10]:
-            title = article.get("title", "").lower()
+            title = str(article.get("title", "")).lower()
             score = 0
             for word in positive_words:
                 if word in title:
@@ -180,16 +223,17 @@ class AnalyzeSentimentTool(Tool):
                 if word in title:
                     score -= 1
             total_score += score
-            articles.append({
-                "title": article.get("title"),
-                "publisher": article.get("publisher"),
-                "link": article.get("link"),
-                "score": score,
-            })
+            articles.append(
+                {
+                    "title": article.get("title"),
+                    "publisher": article.get("publisher"),
+                    "link": article.get("link"),
+                    "score": score,
+                }
+            )
 
-        avg_score = total_score / len(news) if news else 0
-        normalized_score = (avg_score + 2) / 4  # Normalize to 0-1
-        normalized_score = max(0, min(1, normalized_score))
+        avg_score = total_score / max(len(articles), 1)
+        normalized_score = max(0, min(1, (avg_score + 2) / 4))
 
         if normalized_score > 0.6:
             sentiment = "bullish"
