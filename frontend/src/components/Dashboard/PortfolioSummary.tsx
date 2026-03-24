@@ -14,10 +14,10 @@ function StatusCard({
   secondary?: string
 }) {
   return (
-    <div className="rounded-lg border border-dark-border bg-dark-hover/70 p-4">
+    <div className="flex h-full min-h-[128px] flex-col rounded-lg border border-dark-border bg-dark-hover/70 p-4">
       <div className="text-[11px] uppercase tracking-[0.16em] text-dark-muted">{label}</div>
       <div className={`mt-2 text-xl font-semibold ${accent}`}>{value}</div>
-      {secondary && <div className="mt-1 text-xs text-dark-muted">{secondary}</div>}
+      {secondary && <div className="mt-auto pt-2 text-xs text-dark-muted">{secondary}</div>}
     </div>
   )
 }
@@ -53,7 +53,7 @@ export function PortfolioSummary() {
   const refreshLabel = lastUpdate ? formatRelativeTime(lastUpdate, marketType) : '--'
 
   return (
-    <div className="bg-dark-card border border-dark-border rounded-lg">
+    <div className="flex h-full flex-col bg-dark-card border border-dark-border rounded-lg">
       <div className="px-4 py-3 border-b border-dark-border flex items-center justify-between">
         <div>
           <h2 className="text-sm font-semibold text-dark-text">{copy.terminalStatus}</h2>
@@ -65,7 +65,7 @@ export function PortfolioSummary() {
         </div>
       </div>
 
-      <div className="p-4">
+      <div className="flex-1 p-4">
         <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
           <StatusCard
             label={copy.currentMarket}

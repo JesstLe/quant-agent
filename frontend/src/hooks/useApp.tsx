@@ -13,6 +13,7 @@ import type {
   WatchlistItem,
   StrategyType,
   PaperAccount,
+  ManualPaperOrderInput,
 } from '../types'
 
 export type MarketType = 'A' | 'US'
@@ -56,6 +57,9 @@ interface AppContextType {
   addWatchlistSymbol: (symbol: string) => Promise<void>
   setAutoTradingEnabled: (enabled: boolean) => Promise<void>
   resetPaperAccount: () => Promise<void>
+  updatePaperCapital: (capital: number) => Promise<void>
+  placeManualPaperOrder: (input: ManualPaperOrderInput) => Promise<void>
+  closePaperPosition: (symbol: string) => Promise<void>
 }
 
 const AppContext = createContext<AppContextType | null>(null)
@@ -77,9 +81,32 @@ class ApiClient {
     this.baseUrl = baseUrl
   }
 
+  private async buildError(response: Response): Promise<Error> {
+    let message = `API Error: ${response.statusText}`
+    try {
+      const payload = await response.json() as { detail?: string | string[] }
+      const detail = Array.isArray(payload.detail)
+        ? payload.detail.join(', ')
+        : payload.detail
+      if (detail) {
+        message = `API Error: ${detail}`
+      }
+    } catch {
+      try {
+        const text = await response.text()
+        if (text) {
+          message = `API Error: ${text}`
+        }
+      } catch {
+        // Ignore secondary parsing failures and keep the status text.
+      }
+    }
+    return new Error(message)
+  }
+
   async get<T>(endpoint: string): Promise<T> {
     const response = await fetch(`${this.baseUrl}${endpoint}`)
-    if (!response.ok) throw new Error(`API Error: ${response.statusText}`)
+    if (!response.ok) throw await this.buildError(response)
     return response.json()
   }
 
@@ -89,7 +116,7 @@ class ApiClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     })
-    if (!response.ok) throw new Error(`API Error: ${response.statusText}`)
+    if (!response.ok) throw await this.buildError(response)
     return response.json()
   }
 
@@ -97,7 +124,7 @@ class ApiClient {
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       method: 'DELETE',
     })
-    if (!response.ok) throw new Error(`API Error: ${response.statusText}`)
+    if (!response.ok) throw await this.buildError(response)
     return response.json()
   }
 
@@ -210,8 +237,17 @@ export function AppProvider({ children, initialMarketType = 'US' }: AppProviderP
       setWatchlist(watchlistData)
       setPaperAccount(paperAccountData)
       setSelectedSymbolState((currentSymbol) => {
-        if (currentSymbol && marketsData.some((market) => market.symbol === currentSymbol)) {
+        if (
+          currentSymbol
+          && (
+            marketsData.some((market) => market.symbol === currentSymbol)
+            || watchlistData.some((item) => item.symbol === currentSymbol)
+          )
+        ) {
           return currentSymbol
+        }
+        if (watchlistData[0]?.symbol) {
+          return watchlistData[0].symbol
         }
         return marketsData[0]?.symbol ?? null
       })
@@ -287,15 +323,21 @@ export function AppProvider({ children, initialMarketType = 'US' }: AppProviderP
   const toggleWatchlistSymbol = useCallback(async (symbol: string) => {
     try {
       const client = api()
-      const nextWatchlist = isWatchlistSymbol(symbol)
+      const removing = isWatchlistSymbol(symbol)
+      const nextWatchlist = removing
         ? await client.delete<WatchlistItem[]>(`/api/watchlist/${encodeURIComponent(symbol)}?market=${marketType}&strategy=${strategyType}`)
         : await client.post<WatchlistItem[]>(`/api/watchlist/${encodeURIComponent(symbol)}?market=${marketType}&strategy=${strategyType}`, {})
       setWatchlist(nextWatchlist)
+      if (!removing) {
+        setSelectedSymbolState(symbol)
+      } else if (selectedSymbol === symbol) {
+        setSelectedSymbolState(nextWatchlist[0]?.symbol ?? symbol)
+      }
     } catch (err) {
       console.error('Failed to update watchlist:', err)
       setError(err instanceof Error ? err.message : 'Failed to update watchlist')
     }
-  }, [api, isWatchlistSymbol, marketType, strategyType])
+  }, [api, isWatchlistSymbol, marketType, selectedSymbol, strategyType])
 
   const addWatchlistSymbol = useCallback(async (symbol: string) => {
     try {
@@ -344,6 +386,58 @@ export function AppProvider({ children, initialMarketType = 'US' }: AppProviderP
     } catch (err) {
       console.error('Failed to reset paper account:', err)
       setError(err instanceof Error ? err.message : 'Failed to reset paper account')
+    }
+  }, [api, loadData, marketType, strategyType])
+
+  const updatePaperCapital = useCallback(async (capital: number) => {
+    try {
+      const client = api()
+      const nextPaperAccount = await client.post<PaperAccount>(
+        `/api/paper-account/settings?market=${marketType}&strategy=${strategyType}`,
+        { capital },
+      )
+      setPaperAccount(nextPaperAccount)
+      setLastUpdate(new Date())
+      await loadData()
+    } catch (err) {
+      console.error('Failed to update paper capital:', err)
+      setError(err instanceof Error ? err.message : 'Failed to update paper capital')
+    }
+  }, [api, loadData, marketType, strategyType])
+
+  const placeManualPaperOrder = useCallback(async (input: ManualPaperOrderInput) => {
+    try {
+      const client = api()
+      await client.post(
+        `/api/paper-account/orders?market=${marketType}&strategy=${strategyType}`,
+        input,
+      )
+      setLastUpdate(new Date())
+      setSelectedSymbolState(input.symbol)
+      await loadData()
+    } catch (err) {
+      console.error('Failed to place paper order:', err)
+      setError(err instanceof Error ? err.message : 'Failed to place paper order')
+      throw err
+    }
+  }, [api, loadData, marketType, strategyType])
+
+  const closePaperPosition = useCallback(async (symbol: string) => {
+    try {
+      const client = api()
+      await client.post(
+        `/api/paper-account/positions/${encodeURIComponent(symbol)}/close?market=${marketType}&strategy=${strategyType}`,
+        {},
+      )
+      setLastUpdate(new Date())
+      await loadData()
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('no open paper position')) {
+        await loadData()
+        return
+      }
+      console.error('Failed to close paper position:', err)
+      setError(err instanceof Error ? err.message : 'Failed to close paper position')
     }
   }, [api, loadData, marketType, strategyType])
 
@@ -453,6 +547,9 @@ export function AppProvider({ children, initialMarketType = 'US' }: AppProviderP
     addWatchlistSymbol,
     setAutoTradingEnabled,
     resetPaperAccount,
+    updatePaperCapital,
+    placeManualPaperOrder,
+    closePaperPosition,
   }
 
   return (

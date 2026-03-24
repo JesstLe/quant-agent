@@ -16,7 +16,7 @@ from quant_agent.agents.base import AgentContext
 from quant_agent.agents.executor import ExecutorAgent, OrderStatus
 from quant_agent.agents.researcher import ResearcherAgent
 from quant_agent.agents.risk_manager import RiskManagerAgent
-from quant_agent.agents.strategist import SignalType, StrategistAgent
+from quant_agent.agents.strategist import SignalType, StrategistAgent, _normalize_brackets
 from quant_agent.api.demo_service import DashboardDemoService
 from quant_agent.api.persistence import RuntimeStateStore
 from quant_agent.backtest.engine import BacktestEngine
@@ -106,6 +106,7 @@ class DashboardRuntimeService:
             "maxAutoSignalsPerRefresh": 2,
             "lastAutoRunAt": None,
             "lastResetAt": None,
+            "capital": capital,
         }
         self._last_refresh: datetime | None = None
         self._lock = asyncio.Lock()
@@ -181,6 +182,7 @@ class DashboardRuntimeService:
             "name": resolved_name,
             "addedAt": _iso(datetime.now(UTC)),
         }
+        self._ensure_symbol_in_universe(normalized)
         self._watchlist.insert(0, entry)
         self._persist_state()
         return list(self._watchlist)
@@ -199,7 +201,12 @@ class DashboardRuntimeService:
     async def reject_signal(self, signal_id: str) -> dict[str, Any]:
         return await self._update_signal_status(signal_id, "REJECTED")
 
-    async def update_paper_settings(self, *, auto_trading_enabled: bool | None = None) -> dict[str, Any]:
+    async def update_paper_settings(
+        self,
+        *,
+        auto_trading_enabled: bool | None = None,
+        capital: float | None = None,
+    ) -> dict[str, Any]:
         await self._ensure_fresh()
         async with self._lock:
             if auto_trading_enabled is not None:
@@ -211,6 +218,17 @@ class DashboardRuntimeService:
                     message=f"Paper auto-trading {'enabled' if auto_trading_enabled else 'disabled'} for {self.strategy}",
                     details={"autoTradingEnabled": bool(auto_trading_enabled), "strategy": self.strategy},
                 )
+            if capital is not None:
+                self.capital = float(capital)
+                self._paper_settings["capital"] = self.capital
+                self._set_context()
+                self._append_log(
+                    agent_id="agent-system",
+                    agent_name="System",
+                    level="info",
+                    message=f"Paper capital updated to {self.capital:.2f}",
+                    details={"capital": self.capital, "strategy": self.strategy},
+                )
             await self._rebuild_snapshot_views()
             self._persist_state()
             return dict(self._snapshot.get("paperAccount", {}))
@@ -221,6 +239,8 @@ class DashboardRuntimeService:
             self._executor.restore_state({})
             self._risk_manager.restore_state({})
             self._signal_overrides = {}
+            self.capital = float(self._paper_settings.get("capital", self.capital) or self.capital)
+            self._set_context()
             self._paper_settings["lastResetAt"] = _iso(now)
             self._snapshot = self._fallback.snapshot()
             self._logs.clear()
@@ -233,9 +253,153 @@ class DashboardRuntimeService:
                 timestamp=now,
             )
             self._last_refresh = None
-            await self._refresh_snapshot()
+            await self._refresh_snapshot(allow_auto_execute=False)
             self._persist_state()
             return dict(self._snapshot.get("paperAccount", {}))
+
+    async def place_manual_order(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        quantity: float,
+        limit_price: float,
+        stop_loss: float | None = None,
+        target_price: float | None = None,
+    ) -> dict[str, Any]:
+        await self._ensure_fresh()
+        async with self._lock:
+            now = datetime.now(UTC)
+            normalized_symbol = await asyncio.to_thread(self._normalize_watchlist_symbol, symbol)
+            if not normalized_symbol:
+                raise ValueError("symbol is required")
+            is_valid = await asyncio.to_thread(self._validate_watchlist_symbol, normalized_symbol)
+            if not is_valid:
+                raise ValueError(f"unknown symbol: {symbol}")
+            self._ensure_symbol_in_universe(normalized_symbol)
+            await asyncio.to_thread(self._ensure_market_entry, normalized_symbol)
+
+            normalized_side = side.strip().upper()
+            if normalized_side not in {"BUY", "SELL"}:
+                raise ValueError("side must be BUY or SELL")
+            if quantity <= 0:
+                raise ValueError("quantity must be greater than 0")
+            if limit_price <= 0:
+                raise ValueError("price must be greater than 0")
+            signal_type = SignalType.BUY if normalized_side == "BUY" else SignalType.SELL
+            normalized_stop, normalized_target = _normalize_brackets(
+                signal_type,
+                float(limit_price),
+                float(stop_loss) if stop_loss and stop_loss > 0 else None,
+                float(target_price) if target_price and target_price > 0 else None,
+                default_stop_loss_pct=StrategistAgent.DEFAULT_STOP_LOSS_PCT,
+                risk_reward_ratio=StrategistAgent.MIN_RISK_REWARD_RATIO,
+            )
+
+            signal_payload = {
+                "symbol": normalized_symbol,
+                "signal_type": normalized_side.lower(),
+                "confidence": 0.95,
+                "entry_price": float(limit_price),
+                "target_price": float(normalized_target or limit_price),
+                "stop_loss": float(normalized_stop or limit_price),
+                "rationale": "Manual paper order from terminal ticket",
+                "timeframe": "manual",
+                "risk_reward_ratio": 1.0,
+                "position_size_pct": min((float(quantity) * float(limit_price)) / max(self.capital, 1.0), 1.0),
+                "metadata": {
+                    "strategy": "manual",
+                    "source": "manual-ticket",
+                    "manual": True,
+                },
+            }
+            execution = await self._executor.execute(
+                "place_order",
+                signal=signal_payload,
+                quantity=float(quantity),
+                order_type="limit",
+            )
+            if not execution.get("success"):
+                raise ValueError(str(execution.get("execution", {}).get("message") or execution.get("error") or "manual order failed"))
+
+            self._append_log(
+                agent_id="agent-executor",
+                agent_name="Executor",
+                level="success",
+                message=f"Manual {normalized_side} order for {normalized_symbol}",
+                details={
+                    "symbol": normalized_symbol,
+                    "side": normalized_side,
+                    "quantity": float(quantity),
+                    "price": float(limit_price),
+                    "execution": execution,
+                },
+                timestamp=now,
+            )
+            await self._rebuild_snapshot_views(now=now)
+            self._persist_state()
+            return {
+                "success": True,
+                "paperAccount": dict(self._snapshot.get("paperAccount", {})),
+                "order": execution.get("order", {}),
+                "execution": execution.get("execution", {}),
+            }
+
+    async def close_paper_position(self, symbol: str) -> dict[str, Any]:
+        await self._ensure_fresh()
+        async with self._lock:
+            normalized_symbol = symbol.strip().upper()
+            markets = list(self._snapshot.get("markets", []))
+            market_price = next(
+                (
+                    float(market.get("price") or 0.0)
+                    for market in markets
+                    if str(market.get("symbol", "")).upper() == normalized_symbol
+                ),
+                0.0,
+            )
+            if market_price <= 0:
+                chart_payload = await asyncio.to_thread(self._build_chart_payload, normalized_symbol, "1d")
+                market_price = float(chart_payload.get("quote", {}).get("price", 0.0) or 0.0)
+            if market_price <= 0:
+                raise ValueError(f"no market price available for {normalized_symbol}")
+
+            result = self._executor.close_position(normalized_symbol, market_price)
+            events = list(result.get("events", []))
+            if not events:
+                await self._rebuild_snapshot_views()
+                self._persist_state()
+                return {
+                    "success": True,
+                    "symbol": normalized_symbol,
+                    "alreadyClosed": True,
+                    "paperAccount": dict(self._snapshot.get("paperAccount", {})),
+                    "portfolio": dict(self._snapshot.get("portfolio", {})),
+                    "events": [],
+                }
+
+            now = datetime.now(UTC)
+            for event in events:
+                pnl = float(event.get("pnl", 0.0) or 0.0)
+                self._risk_manager.register_trade_outcome(normalized_symbol, pnl)
+                self._append_log(
+                    agent_id="agent-executor",
+                    agent_name="Executor",
+                    level="success" if pnl >= 0 else "warning",
+                    message=f"Manual close for {normalized_symbol} at {market_price:.2f}",
+                    details=event,
+                    timestamp=now,
+                )
+
+            await self._rebuild_snapshot_views()
+            self._persist_state()
+            return {
+                "success": True,
+                "symbol": normalized_symbol,
+                "paperAccount": dict(self._snapshot.get("paperAccount", {})),
+                "portfolio": dict(self._snapshot.get("portfolio", {})),
+                "events": events,
+            }
 
     async def _ensure_fresh(self, force_refresh: bool = False) -> None:
         if not force_refresh and self._snapshot_should_refresh():
@@ -256,7 +420,7 @@ class DashboardRuntimeService:
                     return
             await self._refresh_snapshot()
 
-    async def _refresh_snapshot(self) -> None:
+    async def _refresh_snapshot(self, allow_auto_execute: bool = True) -> None:
         now = datetime.now(UTC)
         self._last_refresh = now
         self._set_context()
@@ -300,7 +464,8 @@ class DashboardRuntimeService:
 
             signal_result = await self._strategist.execute("generate_signals", research_data=research)
             signals = await self._process_signals(signal_result.get("signals", []), markets)
-            await self._auto_execute_pending_signals(signals, now)
+            if allow_auto_execute:
+                await self._auto_execute_pending_signals(signals, now)
             positions, cash_balance = self._build_positions(markets)
             self._risk_manager.sync_positions({position.symbol: abs(position.market_value) for position in positions})
             trades = self._build_trades()
@@ -354,14 +519,30 @@ class DashboardRuntimeService:
         market_lookup = {market["symbol"]: market for market in markets}
 
         for index, signal in enumerate(raw_signals):
+            signal_type = str(signal.get("signal_type", "hold")).upper()
+            signal_enum = SignalType.BUY if signal_type == "BUY" else SignalType.SELL if signal_type == "SELL" else SignalType.HOLD
+            entry_price = float(signal.get("entry_price") or 0)
+            stop_loss, target_price = _normalize_brackets(
+                signal_enum,
+                entry_price,
+                float(signal.get("stop_loss") or 0) or None,
+                float(signal.get("target_price") or 0) or None,
+                default_stop_loss_pct=StrategistAgent.DEFAULT_STOP_LOSS_PCT,
+                risk_reward_ratio=StrategistAgent.MIN_RISK_REWARD_RATIO,
+            )
+            normalized_signal = {
+                **signal,
+                "entry_price": entry_price,
+                "stop_loss": float(stop_loss or 0),
+                "target_price": float(target_price or 0),
+            }
             assessment = await self._risk_manager.execute(
                 "assess_trade",
-                signal=signal,
-                current_price=signal.get("entry_price"),
+                signal=normalized_signal,
+                current_price=entry_price,
             )
-            signal_type = str(signal.get("signal_type", "hold")).upper()
             status = "PENDING" if assessment.get("approved") else "REJECTED"
-            signal_id = self._signal_id(signal)
+            signal_id = self._signal_id(normalized_signal)
             execution_details = None
 
             override = self._signal_overrides.get(signal_id)
@@ -373,16 +554,18 @@ class DashboardRuntimeService:
                 "symbol": signal["symbol"],
                 "type": signal_type,
                 "confidence": round(float(signal.get("confidence", 0.0)), 2),
-                "entryPrice": float(signal.get("entry_price") or 0),
-                "targetPrice": float(signal.get("target_price") or 0),
-                "stopLoss": float(signal.get("stop_loss") or 0),
+                "entryPrice": entry_price,
+                "targetPrice": float(target_price or 0),
+                "stopLoss": float(stop_loss or 0),
                 "rationale": signal.get("rationale", ""),
                 "timestamp": _iso(datetime.now(UTC) - timedelta(minutes=index * 5)),
                 "status": status,
                 "agentSource": "Strategist",
                 "riskScore": round(float(assessment.get("risk_score", 0.0)) * 10, 1),
-                "expectedReturn": self._expected_return_pct(signal),
-                "quantity": self._suggested_quantity(signal),
+                "expectedReturn": self._expected_return_pct(
+                    normalized_signal
+                ),
+                "quantity": self._suggested_quantity(normalized_signal),
                 "strategy": str(signal.get("metadata", {}).get("strategy", self.strategy)),
                 "warnings": list(assessment.get("warnings", [])),
                 "cooldownUntil": assessment.get("cooldown_until"),
@@ -455,7 +638,8 @@ class DashboardRuntimeService:
             first_symbol = str(markets[0].get("symbol", ""))
             if first_symbol:
                 return first_symbol
-        return self.symbols[0]
+        tracked_symbols = self._tracked_symbols()
+        return tracked_symbols[0]
 
     @staticmethod
     def _normalize_chart_interval(interval: str) -> str:
@@ -1166,6 +1350,7 @@ class DashboardRuntimeService:
         }
 
     def _build_agents(self, now: datetime, signal_count: int) -> list[dict[str, Any]]:
+        tracked_symbols = self._tracked_symbols()
         return [
             {
                 "id": "agent-researcher",
@@ -1173,7 +1358,7 @@ class DashboardRuntimeService:
                 "role": "researcher",
                 "status": "running",
                 "lastActivity": _iso(now - timedelta(minutes=2)),
-                "taskCount": len(self.symbols),
+                "taskCount": len(tracked_symbols),
                 "successRate": 95.0,
                 "currentTask": "Refreshing market overview",
                 "description": "Market research and data analysis",
@@ -1508,13 +1693,24 @@ class DashboardRuntimeService:
 
     @staticmethod
     def _executor_signal_payload(signal: dict[str, Any]) -> dict[str, Any]:
+        signal_type = str(signal.get("type", "HOLD")).upper()
+        signal_enum = SignalType.BUY if signal_type == "BUY" else SignalType.SELL if signal_type == "SELL" else SignalType.HOLD
+        entry_price = float(signal.get("entryPrice", 0.0) or 0.0)
+        stop_loss, target_price = _normalize_brackets(
+            signal_enum,
+            entry_price,
+            float(signal.get("stopLoss", 0.0) or 0.0) or None,
+            float(signal.get("targetPrice", 0.0) or 0.0) or None,
+            default_stop_loss_pct=StrategistAgent.DEFAULT_STOP_LOSS_PCT,
+            risk_reward_ratio=StrategistAgent.MIN_RISK_REWARD_RATIO,
+        )
         return {
             "symbol": signal.get("symbol"),
-            "signal_type": str(signal.get("type", "HOLD")).lower(),
+            "signal_type": signal_type.lower(),
             "confidence": float(signal.get("confidence", 0.0) or 0.0),
-            "entry_price": float(signal.get("entryPrice", 0.0) or 0.0),
-            "target_price": float(signal.get("targetPrice", 0.0) or 0.0),
-            "stop_loss": float(signal.get("stopLoss", 0.0) or 0.0),
+            "entry_price": entry_price,
+            "target_price": float(target_price or 0.0),
+            "stop_loss": float(stop_loss or 0.0),
             "rationale": signal.get("rationale", ""),
             "timeframe": "medium",
             "risk_reward_ratio": 2.0,
@@ -1524,7 +1720,7 @@ class DashboardRuntimeService:
 
     def _set_context(self) -> None:
         context = AgentContext(
-            symbols=self.symbols,
+            symbols=self._tracked_symbols(),
             strategy=self.strategy,
             mode="paper",
             capital=self.capital,
@@ -1532,6 +1728,63 @@ class DashboardRuntimeService:
         )
         for agent in (self._researcher, self._strategist, self._risk_manager, self._executor):
             agent.set_context(context)
+
+    def _tracked_symbols(self) -> list[str]:
+        tracked: list[str] = []
+        for symbol in self.symbols:
+            normalized = str(symbol).strip().upper()
+            if normalized and normalized not in tracked:
+                tracked.append(normalized)
+        for item in self._watchlist:
+            normalized = str(item.get("symbol", "")).strip().upper()
+            if normalized and normalized not in tracked:
+                tracked.append(normalized)
+        for position in self._executor.get_managed_positions():
+            if position.status != "open":
+                continue
+            normalized = str(position.symbol).strip().upper()
+            if normalized and normalized not in tracked:
+                tracked.append(normalized)
+        return tracked or list(self.symbols)
+
+    def _ensure_symbol_in_universe(self, symbol: str) -> None:
+        normalized = symbol.strip().upper()
+        if not normalized:
+            return
+        if normalized not in self.symbols:
+            self.symbols.append(normalized)
+        self._set_context()
+
+    def _ensure_market_entry(self, symbol: str) -> None:
+        normalized = symbol.strip().upper()
+        markets = self._snapshot.get("markets", [])
+        if not isinstance(markets, list):
+            self._snapshot["markets"] = []
+            markets = self._snapshot["markets"]
+        if any(str(item.get("symbol", "")).upper() == normalized for item in markets if isinstance(item, dict)):
+            return
+
+        try:
+            chart = self._build_chart_payload(normalized, "1d")
+        except Exception:
+            return
+
+        quote = dict(chart.get("quote", {}))
+        markets.append(
+            {
+                "symbol": normalized,
+                "name": str(chart.get("name") or normalized),
+                "price": round(float(quote.get("price") or 0.0), 2),
+                "change": round(float(quote.get("change") or 0.0), 2),
+                "changePercent": round(float(quote.get("changePercent") or 0.0), 2),
+                "volume": int(float(quote.get("volume") or 0.0)),
+                "high24h": round(float(quote.get("high") or quote.get("price") or 0.0), 2),
+                "low24h": round(float(quote.get("low") or quote.get("price") or 0.0), 2),
+                "open": round(float(quote.get("open") or quote.get("price") or 0.0), 2),
+                "previousClose": round(float(quote.get("previousClose") or quote.get("price") or 0.0), 2),
+                "sector": "Watchlist",
+            }
+        )
 
     def _state_key(self, name: str) -> str:
         return f"{self._state_key_prefix}{name}"
@@ -1643,6 +1896,8 @@ class DashboardRuntimeService:
                 **self._paper_settings,
                 **paper_settings,
             }
+            self.capital = float(self._paper_settings.get("capital", self.capital) or self.capital)
+            self._set_context()
 
         watchlist = self._state_store.load(self._shared_state_key("watchlist"))
         if isinstance(watchlist, list):

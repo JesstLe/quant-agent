@@ -224,6 +224,15 @@ export interface PaperAccount {
   tradingPaused?: boolean
 }
 
+export interface ManualPaperOrderInput {
+  symbol: string
+  side: 'BUY' | 'SELL'
+  quantity: number
+  price: number
+  stopLoss?: number
+  targetPrice?: number
+}
+
 // ============================================================
 // Portfolio Types
 // ============================================================

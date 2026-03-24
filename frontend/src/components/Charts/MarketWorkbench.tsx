@@ -468,26 +468,43 @@ function SymbolStrip({
   selectedSymbol,
   setSelectedSymbol,
   markets,
+  removableSymbols,
+  onRemove,
 }: {
   selectedSymbol: string
   setSelectedSymbol: (symbol: string) => void
   markets: Array<{ symbol: string; name: string }>
+  removableSymbols?: Set<string>
+  onRemove?: (symbol: string) => void
 }) {
   return (
     <div className="flex flex-wrap gap-2">
       {markets.map((market) => (
-        <button
+        <div
           key={market.symbol}
-          onClick={() => setSelectedSymbol(market.symbol)}
-          className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+          className={`flex items-start gap-2 rounded-lg border px-3 py-2 transition-colors ${
             selectedSymbol === market.symbol
               ? 'border-info/50 bg-info/10 text-dark-text'
               : 'border-dark-border bg-dark-hover text-dark-muted hover:text-dark-text'
           }`}
         >
-          <div className="text-xs font-medium">{market.symbol}</div>
-          <div className="mt-0.5 text-[11px]">{market.name}</div>
-        </button>
+          <button
+            onClick={() => setSelectedSymbol(market.symbol)}
+            className="min-w-0 flex-1 text-left"
+          >
+            <div className="text-xs font-medium">{market.symbol}</div>
+            <div className="mt-0.5 truncate text-[11px]">{market.name}</div>
+          </button>
+          {removableSymbols?.has(market.symbol) && onRemove ? (
+            <button
+              type="button"
+              onClick={() => onRemove(market.symbol)}
+              className="rounded border border-dark-border px-1.5 py-0.5 text-[10px] text-dark-muted hover:text-dark-text"
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
       ))}
     </div>
   )
@@ -878,10 +895,25 @@ function PositionManagementPanel({
     )
   }
 
+  const bracketArrow = (kind: 'target' | 'stop') => {
+    if (signal.side === 'SHORT') {
+      return kind === 'target' ? '↓' : '↑'
+    }
+    return kind === 'target' ? '↑' : '↓'
+  }
+
   const rows = [
     { label: copy.strategy, value: signal.strategy ?? '--' },
-    { label: copy.protectiveStop, value: signal.stopLoss ? formatCurrency(signal.stopLoss, false, marketType) : '--' },
-    { label: copy.target, value: signal.targetPrice ? formatCurrency(signal.targetPrice, false, marketType) : '--' },
+    {
+      label: `${copy.protectiveStop} ${bracketArrow('stop')}`,
+      value: signal.stopLoss ? formatCurrency(signal.stopLoss, false, marketType) : '--',
+      className: signal.stopLoss ? 'text-warning' : 'text-dark-text',
+    },
+    {
+      label: `${copy.target} ${bracketArrow('target')}`,
+      value: signal.targetPrice ? formatCurrency(signal.targetPrice, false, marketType) : '--',
+      className: signal.targetPrice ? 'text-info' : 'text-dark-text',
+    },
     { label: copy.kelly, value: typeof signal.kellyFraction === 'number' ? `${(signal.kellyFraction * 100).toFixed(1)}%` : '--' },
     { label: copy.holdingTime, value: typeof signal.holdingMinutes === 'number' ? `${signal.holdingMinutes}m` : '--' },
     { label: copy.timeDecay, value: typeof signal.timeDecayMinutes === 'number' && signal.timeDecayMinutes > 0 ? `${signal.timeDecayMinutes}m` : '--' },
@@ -913,7 +945,7 @@ function PositionManagementPanel({
         {rows.map((row) => (
           <div key={row.label} className="rounded-lg border border-dark-border bg-dark-card/60 px-3 py-2">
             <div className="text-[11px] uppercase tracking-[0.14em] text-dark-muted">{row.label}</div>
-            <div className="mt-1 text-sm font-medium text-dark-text">{row.value}</div>
+            <div className={`mt-1 text-sm font-medium ${row.className ?? 'text-dark-text'}`}>{row.value}</div>
           </div>
         ))}
       </div>
@@ -1168,12 +1200,10 @@ function AShareQuoteRail({
   chartData,
   marketType,
   copy,
-  hover,
 }: {
   chartData: ChartSnapshot
   marketType: 'A' | 'US'
   copy: ReturnType<typeof getDashboardCopy>
-  hover: HoverSnapshot | null
 }) {
   const quote = chartData.quote
   const rows = [
@@ -1188,37 +1218,30 @@ function AShareQuoteRail({
   ]
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-lg border border-dark-border bg-dark-hover/30 p-3">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-dark-text">{copy.quoteOverview}</h3>
-          <span className={`text-xs font-medium ${getSignedTextClass(quote.changePercent, marketType)}`}>
-            {formatPercent(quote.changePercent)}
-          </span>
-        </div>
-        <div className="space-y-2">
-          {rows.map((row) => (
-            <div
-              key={row.label}
-              className="flex items-center justify-between rounded-lg border border-dark-border bg-dark-card/60 px-3 py-2"
-            >
-              <span className="text-xs uppercase tracking-[0.12em] text-dark-muted">{row.label}</span>
-              <span
-                className={[
-                  row.emphasize ? `text-lg font-semibold ${getSignedTextClass(quote.changePercent, marketType)}` : 'text-sm font-medium text-dark-text',
-                  row.accent ?? '',
-                ].join(' ')}
-              >
-                {row.value}
-              </span>
-            </div>
-          ))}
-        </div>
+    <div className="rounded-lg border border-dark-border bg-dark-hover/30 p-3">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-dark-text">{copy.quoteOverview}</h3>
+        <span className={`text-xs font-medium ${getSignedTextClass(quote.changePercent, marketType)}`}>
+          {formatPercent(quote.changePercent)}
+        </span>
       </div>
-
-      <div className="rounded-lg border border-dark-border bg-dark-hover/30 p-3">
-        <div className="mb-2 text-xs uppercase tracking-[0.14em] text-dark-muted">{copy.dateAxis}</div>
-        <HoverBar hover={hover} marketType={marketType} />
+      <div className="space-y-2">
+        {rows.map((row) => (
+          <div
+            key={row.label}
+            className="flex items-center justify-between rounded-lg border border-dark-border bg-dark-card/60 px-3 py-2"
+          >
+            <span className="text-xs uppercase tracking-[0.12em] text-dark-muted">{row.label}</span>
+            <span
+              className={[
+                row.emphasize ? `text-lg font-semibold ${getSignedTextClass(quote.changePercent, marketType)}` : 'text-sm font-medium text-dark-text',
+                row.accent ?? '',
+              ].join(' ')}
+            >
+              {row.value}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -1235,6 +1258,7 @@ export function MarketWorkbench() {
     selectedSymbol,
     setSelectedSymbol,
     watchlist,
+    isWatchlistSymbol,
     toggleWatchlistSymbol,
     addWatchlistSymbol,
   } = useApp()
@@ -1279,6 +1303,8 @@ export function MarketWorkbench() {
     symbol: market.symbol,
     name: market.name,
   }))
+  const workspaceSymbols = watchlistMarkets.map((market) => ({ symbol: market.symbol, name: market.name }))
+  const removableSymbols = new Set(workspaceSymbols.map((market) => market.symbol))
   const selectedPosition = portfolio?.positions.find((position) => position.symbol === selectedSymbol) ?? null
   const selectedSignal = signals.find((signal) => signal.symbol === selectedSymbol && signal.status !== 'REJECTED') ?? null
   const symbolActivityItems: ActivityItem[] = logs
@@ -1698,6 +1724,17 @@ export function MarketWorkbench() {
                   <span className="ml-2 text-sm font-normal text-dark-muted">{chartData.name}</span>
                 </div>
               </div>
+              <button
+                type="button"
+                onClick={() => void toggleWatchlistSymbol(chartData.symbol)}
+                className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                  isWatchlistSymbol(chartData.symbol)
+                    ? 'border-warning/30 bg-warning/10 text-warning'
+                    : 'border-dark-border bg-dark-hover text-dark-muted hover:text-dark-text'
+                }`}
+              >
+                {isWatchlistSymbol(chartData.symbol) ? copy.removeFromWatchlist : copy.addToWatchlist}
+              </button>
               <div className={getSignedTextClass(quote.changePercent, marketType)}>
                 <div className="text-3xl font-bold">{formatCurrency(quote.price, false, marketType)}</div>
                 <div className="text-sm">
@@ -1711,7 +1748,19 @@ export function MarketWorkbench() {
 
       <div className="border-b border-dark-border px-4 py-3">
         <div className="mb-2 text-xs uppercase tracking-[0.14em] text-dark-muted">{copy.selectSymbolHint}</div>
-        <SymbolStrip selectedSymbol={selectedSymbol} setSelectedSymbol={setSelectedSymbol} markets={markets} />
+        {workspaceSymbols.length > 0 ? (
+          <SymbolStrip
+            selectedSymbol={selectedSymbol}
+            setSelectedSymbol={setSelectedSymbol}
+            markets={workspaceSymbols}
+            removableSymbols={removableSymbols}
+            onRemove={(symbol) => void toggleWatchlistSymbol(symbol)}
+          />
+        ) : (
+          <div className="rounded-lg border border-dashed border-dark-border bg-dark-hover/20 px-3 py-3 text-sm text-dark-muted">
+            {copy.noWatchlist}
+          </div>
+        )}
       </div>
 
       <div className="space-y-4 px-4 py-4">
@@ -1733,7 +1782,16 @@ export function MarketWorkbench() {
         {marketType === 'A' ? (
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
             <div className="lg:w-[220px] lg:flex-none">
-              <AShareQuoteRail chartData={chartData} marketType={marketType} copy={copy} hover={hover} />
+              <div className="space-y-4">
+                <AShareQuoteRail chartData={chartData} marketType={marketType} copy={copy} />
+                <PositionManagementPanel
+                  title={copy.positionManagement}
+                  copy={copy}
+                  marketType={marketType}
+                  signal={managementState}
+                  emptyText={copy.noManagement}
+                />
+              </div>
             </div>
             <div className="space-y-4 lg:min-w-0 lg:flex-1">
               <div className="rounded-lg border border-dark-border bg-dark-hover/30 p-3">
@@ -1761,13 +1819,6 @@ export function MarketWorkbench() {
             <div className="lg:w-[340px] lg:flex-none">
               <div className="space-y-4">
                 <AShareBookPanel chartData={chartData} marketType={marketType} copy={copy} />
-                <PositionManagementPanel
-                  title={copy.positionManagement}
-                  copy={copy}
-                  marketType={marketType}
-                  signal={managementState}
-                  emptyText={copy.noManagement}
-                />
                 <TradeActivityPanel
                   title={copy.tradeActivity}
                   items={symbolActivityItems}

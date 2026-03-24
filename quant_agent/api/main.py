@@ -206,10 +206,18 @@ async def update_paper_account_settings(
     auto_trading_enabled = payload.get("autoTradingEnabled")
     if auto_trading_enabled is not None and not isinstance(auto_trading_enabled, bool):
         raise HTTPException(status_code=422, detail="autoTradingEnabled must be a boolean")
+    capital = payload.get("capital")
+    if capital is not None:
+        try:
+            capital = float(capital)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="capital must be a number") from exc
+        if capital <= 0:
+            raise HTTPException(status_code=422, detail="capital must be greater than 0")
     return await get_service(
         validate_market(market),
         validate_strategy(strategy),
-    ).update_paper_settings(auto_trading_enabled=auto_trading_enabled)
+    ).update_paper_settings(auto_trading_enabled=auto_trading_enabled, capital=capital)
 
 
 @app.post("/api/paper-account/reset")
@@ -218,6 +226,43 @@ async def reset_paper_account(
     strategy: str = Query("fortress"),
 ) -> dict:
     return await get_service(validate_market(market), validate_strategy(strategy)).reset_paper_account()
+
+
+@app.post("/api/paper-account/orders")
+async def place_paper_order(
+    payload: dict = Body(...),
+    market: str = Query("US", pattern="^(A|US)$"),
+    strategy: str = Query("fortress"),
+) -> dict:
+    try:
+        return await get_service(
+            validate_market(market),
+            validate_strategy(strategy),
+        ).place_manual_order(
+            symbol=str(payload.get("symbol", "")),
+            side=str(payload.get("side", "")),
+            quantity=float(payload.get("quantity", 0) or 0),
+            limit_price=float(payload.get("price", 0) or 0),
+            stop_loss=float(payload["stopLoss"]) if payload.get("stopLoss") is not None else None,
+            target_price=float(payload["targetPrice"]) if payload.get("targetPrice") is not None else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/paper-account/positions/{symbol}/close")
+async def close_paper_position(
+    symbol: str,
+    market: str = Query("US", pattern="^(A|US)$"),
+    strategy: str = Query("fortress"),
+) -> dict:
+    try:
+        return await get_service(
+            validate_market(market),
+            validate_strategy(strategy),
+        ).close_paper_position(symbol)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/api/watchlist/{symbol}")

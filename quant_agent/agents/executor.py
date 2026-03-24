@@ -7,7 +7,11 @@ from enum import Enum
 from typing import Any
 
 from quant_agent.agents.base import AgentRole, BaseAgent
-from quant_agent.agents.strategist import SignalType, TradingSignal
+from quant_agent.agents.strategist import (
+    SignalType,
+    TradingSignal,
+    _normalize_brackets,
+)
 from quant_agent.core.llm import LLMProvider
 from quant_agent.core.memory import AgentMemory, MemoryType
 
@@ -502,8 +506,10 @@ Always report:
         else:
             fill_price = base_price * (1 - slippage_bps / 10000)
 
-        # Simulate fill (95% success rate for paper)
-        success = random.random() < 0.95
+        is_manual_order = bool(signal.metadata.get("manual")) or str(signal.metadata.get("source", "")).lower() == "manual-ticket"
+
+        # Manual paper tickets should behave deterministically instead of failing randomly.
+        success = True if is_manual_order else (random.random() < 0.95)
         if success:
             status = OrderStatus.FILLED
             filled_qty = order.quantity
@@ -758,8 +764,16 @@ Provide:
             return
 
         side = "long" if signal.signal_type == SignalType.BUY else "short"
-        stop_loss = float(signal.stop_loss or order.avg_fill_price)
-        target_price = float(signal.target_price or order.avg_fill_price)
+        stop_loss, target_price = _normalize_brackets(
+            signal.signal_type,
+            float(order.avg_fill_price),
+            float(signal.stop_loss or order.avg_fill_price),
+            float(signal.target_price or order.avg_fill_price),
+            default_stop_loss_pct=0.05,
+            risk_reward_ratio=2.0,
+        )
+        stop_loss = float(stop_loss or order.avg_fill_price)
+        target_price = float(target_price or order.avg_fill_price)
         risk_per_share = abs(float(order.avg_fill_price) - stop_loss)
         if risk_per_share <= 0:
             risk_per_share = max(float(order.avg_fill_price) * 0.01, 0.01)
@@ -867,6 +881,35 @@ Provide:
         """Return managed positions for dashboard projection."""
         return list(self._managed_positions.values())
 
+    def close_position(self, symbol: str, fill_price: float) -> dict[str, Any]:
+        """Force-close all open managed positions for a symbol."""
+        normalized_symbol = symbol.strip().upper()
+        events: list[dict[str, Any]] = []
+
+        for position in list(self._managed_positions.values()):
+            if position.symbol.upper() != normalized_symbol or position.status != "open" or position.quantity <= 0:
+                continue
+
+            closed_qty = position.quantity
+            pnl = self._close_managed_position_slice(
+                position,
+                quantity=closed_qty,
+                fill_price=fill_price,
+                reason="manual_close",
+                close_all=True,
+            )
+            events.append(
+                {
+                    "symbol": position.symbol,
+                    "reason": "manual_close",
+                    "price": fill_price,
+                    "quantity": closed_qty,
+                    "pnl": pnl,
+                }
+            )
+
+        return {"events": events, "managed_positions": [position.to_dict() for position in self._managed_positions.values()]}
+
     def restore_state(self, state: dict[str, Any]) -> None:
         """Restore executor state from persisted data."""
         restored_orders = [Order.from_dict(payload) for payload in state.get("orders", [])]
@@ -885,6 +928,19 @@ Provide:
             for payload in state.get("managed_positions", [])
             if isinstance(payload, dict)
         ]
+        for position in restored_positions:
+            signal_type = SignalType.BUY if position.side == "long" else SignalType.SELL
+            stop_loss, target_price = _normalize_brackets(
+                signal_type,
+                position.entry_price,
+                position.stop_loss,
+                position.target_price,
+                default_stop_loss_pct=0.05,
+                risk_reward_ratio=2.0,
+            )
+            position.stop_loss = float(stop_loss or position.entry_price)
+            position.target_price = float(target_price or position.entry_price)
+            position.risk_per_share = max(abs(position.entry_price - position.stop_loss), 0.01)
         self._managed_positions = {position.position_id: position for position in restored_positions}
         self._positions = {}
         for order in restored_orders:

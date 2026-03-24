@@ -31,10 +31,14 @@ export function SignalsPanel() {
   const [pendingActionId, setPendingActionId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const copy = getDashboardCopy(marketType)
-  const priceDeltaClass = (signal: { entryPrice: number; targetPrice: number; stopLoss: number; type: SignalType }, kind: 'target' | 'stop') => {
-    const reference = signal.entryPrice || 0
-    const price = kind === 'target' ? signal.targetPrice : signal.stopLoss
-    return getSignedTextClass(price - reference, marketType)
+  const bracketArrow = (
+    signal: { type: SignalType },
+    kind: 'target' | 'stop',
+  ) => {
+    if (signal.type === 'SELL') {
+      return kind === 'target' ? '↓' : '↑'
+    }
+    return kind === 'target' ? '↑' : '↓'
   }
 
   const handleReview = async (signalId: string, action: 'approve' | 'reject') => {
@@ -129,10 +133,10 @@ export function SignalsPanel() {
                       {copy.entry}: <span className="text-dark-text">{formatCurrency(signal.entryPrice, false, marketType)}</span>
                     </span>
                     <span className="text-dark-muted">
-                      {copy.target}: <span className={priceDeltaClass(signal, 'target')}>{formatCurrency(signal.targetPrice, false, marketType)}</span>
+                      {copy.target} {bracketArrow(signal, 'target')}: <span className="text-info">{formatCurrency(signal.targetPrice, false, marketType)}</span>
                     </span>
                     <span className="text-dark-muted">
-                      {copy.stop}: <span className={priceDeltaClass(signal, 'stop')}>{formatCurrency(signal.stopLoss, false, marketType)}</span>
+                      {copy.stop} {bracketArrow(signal, 'stop')}: <span className="text-warning">{formatCurrency(signal.stopLoss, false, marketType)}</span>
                     </span>
                   </div>
                   <div className="flex items-center gap-2">

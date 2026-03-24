@@ -5,7 +5,7 @@ import { getDashboardCopy, getSignedTextClass } from '../../utils/market'
 import type { Position } from '../../types'
 
 export function PositionsTable() {
-  const { portfolio, isLoading, marketType } = useApp()
+  const { portfolio, isLoading, marketType, closePaperPosition, isWatchlistSymbol, toggleWatchlistSymbol } = useApp()
   const [sortBy, setSortBy] = useState<keyof Position>('marketValue')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const copy = getDashboardCopy(marketType)
@@ -54,6 +54,16 @@ export function PositionsTable() {
     </span>
   )
 
+  const bracketArrow = (position: Position, kind: 'target' | 'stop') => {
+    if (position.side === 'SHORT') {
+      return kind === 'target' ? '↓' : '↑'
+    }
+    return kind === 'target' ? '↑' : '↓'
+  }
+
+  const displayQuantity = (position: Position) => Math.abs(position.quantity)
+  const totalDisplayedQuantity = portfolio.positions.reduce((sum, position) => sum + Math.abs(position.quantity), 0)
+
   return (
     <div className="bg-dark-card border border-dark-border rounded-lg">
       <div className="px-4 py-3 border-b border-dark-border flex items-center justify-between">
@@ -96,6 +106,7 @@ export function PositionsTable() {
                 {copy.value} <SortIndicator column="marketValue" />
               </th>
               <th className="px-4 py-3 text-right">{copy.weight}</th>
+              <th className="px-4 py-3 text-right">{copy.actions}</th>
             </tr>
           </thead>
           <tbody>
@@ -135,7 +146,7 @@ export function PositionsTable() {
                   </div>
                 </td>
                 <td className="px-4 py-3 text-right text-dark-muted">
-                  {formatNumber(position.quantity, false, marketType)}
+                  {formatNumber(displayQuantity(position), false, marketType)}
                 </td>
                 <td className="px-4 py-3 text-right text-dark-muted">
                   {formatCurrency(position.avgPrice, false, marketType)}
@@ -145,13 +156,13 @@ export function PositionsTable() {
                   {(position.protectiveStop || position.targetPrice) && (
                     <div className="mt-1 space-y-0.5 text-[10px] font-normal text-dark-muted">
                       {position.protectiveStop ? (
-                        <div>
-                          {copy.protectiveStop}: {formatCurrency(position.protectiveStop, false, marketType)}
+                        <div className="text-warning">
+                          {copy.protectiveStop} {bracketArrow(position, 'stop')}: {formatCurrency(position.protectiveStop, false, marketType)}
                         </div>
                       ) : null}
                       {position.targetPrice ? (
-                        <div>
-                          {copy.target}: {formatCurrency(position.targetPrice, false, marketType)}
+                        <div className="text-info">
+                          {copy.target} {bracketArrow(position, 'target')}: {formatCurrency(position.targetPrice, false, marketType)}
                         </div>
                       ) : null}
                     </div>
@@ -168,12 +179,12 @@ export function PositionsTable() {
                   </div>
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <span className={getSignedTextClass(position.dayChange, marketType)}>
+                  <span className={getSignedTextClass(position.dayChangePercent, marketType)}>
                     {formatPercent(position.dayChangePercent)}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-right text-dark-text font-medium">
-                  {formatCurrency(position.marketValue, true, marketType)}
+                  {formatCurrency(position.marketValue, false, marketType)}
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-2">
@@ -207,6 +218,26 @@ export function PositionsTable() {
                     </div>
                   )}
                 </td>
+                <td className="px-4 py-3 text-right">
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void closePaperPosition(position.symbol)}
+                      className="rounded-lg border border-loss/30 bg-loss/10 px-3 py-1.5 text-xs font-medium text-loss transition-colors hover:bg-loss/20"
+                    >
+                      {copy.closePosition}
+                    </button>
+                    {isWatchlistSymbol(position.symbol) ? (
+                      <button
+                        type="button"
+                        onClick={() => void toggleWatchlistSymbol(position.symbol)}
+                        className="rounded-lg border border-dark-border bg-dark-hover px-3 py-1.5 text-xs font-medium text-dark-muted transition-colors hover:text-dark-text"
+                      >
+                        {copy.removeFromWatchlist}
+                      </button>
+                    ) : null}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -214,7 +245,7 @@ export function PositionsTable() {
             <tr className="bg-dark-hover text-sm font-medium">
               <td className="px-4 py-3 text-dark-text">{copy.total}</td>
               <td className="px-4 py-3 text-right text-dark-muted">
-                {formatNumber(portfolio.positions.reduce((sum, p) => sum + p.quantity, 0), false, marketType)}
+                {formatNumber(totalDisplayedQuantity, false, marketType)}
               </td>
               <td className="px-4 py-3"></td>
               <td className="px-4 py-3"></td>
@@ -229,9 +260,10 @@ export function PositionsTable() {
                 </span>
               </td>
               <td className="px-4 py-3 text-right text-dark-text">
-                {formatCurrency(portfolio.investedValue, true, marketType)}
+                {formatCurrency(portfolio.investedValue, false, marketType)}
               </td>
               <td className="px-4 py-3 text-right text-dark-muted">100%</td>
+              <td className="px-4 py-3"></td>
             </tr>
           </tfoot>
         </table>

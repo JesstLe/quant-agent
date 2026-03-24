@@ -132,14 +132,14 @@ function MainContent() {
         )}
 
         {/* Top row - Summary, Paper, and Agents */}
-        <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
-          <div className="xl:col-span-2">
+        <div className="grid grid-cols-1 items-stretch xl:grid-cols-4 gap-6">
+          <div className="h-full xl:col-span-2">
             <PortfolioSummary />
           </div>
-          <div>
+          <div className="h-full">
             <PaperTradingPanel />
           </div>
-          <div>
+          <div className="h-full">
             <AgentsPanel />
           </div>
         </div>

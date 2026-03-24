@@ -44,7 +44,7 @@ export function AgentsPanel() {
 
   if (isLoading) {
     return (
-      <div className="bg-dark-card border border-dark-border rounded-lg p-6 animate-pulse">
+      <div className="h-full bg-dark-card border border-dark-border rounded-lg p-6 animate-pulse">
         <div className="grid grid-cols-2 gap-3">
           {[...Array(4)].map((_, i) => (
             <div key={i} className="h-24 bg-dark-hover rounded"></div>
@@ -55,7 +55,7 @@ export function AgentsPanel() {
   }
 
   return (
-    <div className="bg-dark-card border border-dark-border rounded-lg">
+    <div className="flex h-full flex-col bg-dark-card border border-dark-border rounded-lg">
       <div className="px-4 py-3 border-b border-dark-border flex items-center justify-between">
         <h2 className="text-sm font-semibold text-dark-text">{copy.agentMonitor}</h2>
         <div className="flex items-center gap-1">
@@ -63,7 +63,7 @@ export function AgentsPanel() {
           <span className="text-xs text-dark-muted">{copy.systemActive}</span>
         </div>
       </div>
-      <div className="p-4">
+      <div className="flex flex-1 flex-col p-4">
         {/* Agent Grid */}
         <div className="grid grid-cols-2 gap-3 mb-4">
           {agents.map((agent) => {
@@ -73,7 +73,7 @@ export function AgentsPanel() {
             return (
               <div
                 key={agent.id}
-                className={`${styles.bg} rounded-lg p-3 border border-dark-border`}
+                className={`${styles.bg} flex min-h-[188px] flex-col rounded-lg p-3 border border-dark-border`}
               >
                 <div className="flex items-start justify-between mb-2">
                   <div className="flex items-center gap-2">
@@ -107,7 +107,7 @@ export function AgentsPanel() {
 
                 {/* Current Task */}
                 {agent.currentTask && (
-                  <div className="mt-2 pt-2 border-t border-dark-border/50">
+                  <div className="mt-auto pt-2 border-t border-dark-border/50">
                     <div className="text-xs text-dark-muted truncate">
                       {localizeAgentTask(agent.currentTask, marketType)}
                     </div>
@@ -119,7 +119,7 @@ export function AgentsPanel() {
         </div>
 
         {/* Recent Activity Log */}
-        <div className="border-t border-dark-border pt-4">
+        <div className="mt-auto border-t border-dark-border pt-4">
           <div className="text-xs text-dark-muted uppercase tracking-wider mb-2">{copy.activityLog}</div>
           <div className="space-y-2 max-h-32 overflow-y-auto">
             {logs.slice(0, 5).map((log) => (
