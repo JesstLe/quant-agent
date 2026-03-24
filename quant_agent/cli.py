@@ -20,7 +20,7 @@ def main():
 
 @main.command()
 @click.option("--mode", type=click.Choice(["paper", "live"]), default="paper", help="Trading mode")
-@click.option("--strategy", type=str, default="momentum", help="Strategy to use")
+@click.option("--strategy", type=str, default="fortress", help="Strategy to use")
 @click.option("--symbols", type=str, help="Comma-separated list of symbols")
 def start(mode: str, strategy: str, symbols: Optional[str]):
     """Start the trading agent system."""

@@ -57,6 +57,12 @@ Output format:
         """Perform comprehensive analysis of a symbol."""
         # Fetch market data
         market_data = await self.tools.execute("get_market_data", symbol=symbol, period="3mo")
+        intraday_market_data = await self.tools.execute(
+            "get_market_data",
+            symbol=symbol,
+            period="5d",
+            interval="15m",
+        )
 
         # Get stock info
         stock_info = await self.tools.execute("get_stock_info", symbol=symbol)
@@ -66,10 +72,41 @@ Output format:
             indicators = await self.tools.execute(
                 "calculate_indicators",
                 data=market_data["data"],
-                indicators=["sma_20", "sma_50", "rsi", "macd"],
+                indicators=[
+                    "sma_20",
+                    "sma_50",
+                    "ema_9",
+                    "ema_21",
+                    "rsi",
+                    "macd",
+                    "atr_14",
+                    "adx_14",
+                    "vwap",
+                    "avg_volume",
+                    "body_pct",
+                ],
             )
         else:
             indicators = {}
+
+        if intraday_market_data.get("data"):
+            intraday_indicators = await self.tools.execute(
+                "calculate_indicators",
+                data=intraday_market_data["data"],
+                indicators=[
+                    "ema_9",
+                    "ema_21",
+                    "rsi",
+                    "macd",
+                    "atr_14",
+                    "adx_14",
+                    "vwap",
+                    "avg_volume",
+                    "body_pct",
+                ],
+            )
+        else:
+            intraday_indicators = {}
 
         # Analyze sentiment
         sentiment = await self.tools.execute("analyze_sentiment", symbol=symbol)
@@ -78,8 +115,10 @@ Output format:
         analysis = {
             "symbol": symbol,
             "market_data": market_data,
+            "intraday_market_data": intraday_market_data,
             "stock_info": stock_info,
             "indicators": indicators,
+            "intraday_indicators": intraday_indicators,
             "sentiment": sentiment,
         }
 

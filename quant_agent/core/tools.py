@@ -4,14 +4,10 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import Any
 
-try:
-    import akshare as ak
-except ImportError:  # pragma: no cover - optional dependency
-    ak = None
 import pandas as pd
-import yfinance as yf
 
 from quant_agent.core.memory import AgentMemory, MemoryType
+from quant_agent.data.providers import get_market_data_provider
 
 
 def _is_a_stock(symbol: str) -> bool:
@@ -77,8 +73,8 @@ class GetMarketDataTool(Tool):
     ) -> dict[str, Any]:
         """Fetch market data from Yahoo Finance for both A-shares and US equities."""
         try:
-            ticker = yf.Ticker(symbol)
-            df = ticker.history(period=period, interval=interval, auto_adjust=False)
+            provider = get_market_data_provider("A" if _is_a_stock(symbol) else "US")
+            df = provider.get_history(symbol, period=period, interval=interval, auto_adjust=False)
             if df.empty:
                 return {"error": f"No data found for {symbol}"}
 
@@ -114,8 +110,8 @@ class GetStockInfoTool(Tool):
     async def execute(self, symbol: str) -> dict[str, Any]:
         """Get stock information."""
         try:
-            ticker = yf.Ticker(symbol)
-            info = ticker.info or {}
+            provider = get_market_data_provider("A" if _is_a_stock(symbol) else "US")
+            info = provider.get_info(symbol)
             name = info.get("longName") or info.get("shortName") or symbol
 
             return {
@@ -154,6 +150,13 @@ class CalculateIndicatorsTool(Tool):
     ) -> dict[str, Any]:
         """Calculate technical indicators."""
         df = pd.DataFrame(data)
+        if df.empty:
+            return {}
+
+        df = df.copy()
+        for column in ("Open", "High", "Low", "Close", "Volume"):
+            if column in df.columns:
+                df[column] = pd.to_numeric(df[column], errors="coerce")
 
         results = {}
 
@@ -162,17 +165,33 @@ class CalculateIndicatorsTool(Tool):
                 results["sma_20"] = df["Close"].rolling(window=20).mean().tolist()
             elif indicator == "sma_50":
                 results["sma_50"] = df["Close"].rolling(window=50).mean().tolist()
+            elif indicator == "ema_9":
+                results["ema_9"] = df["Close"].ewm(span=9, adjust=False).mean().tolist()
+            elif indicator == "ema_21":
+                results["ema_21"] = df["Close"].ewm(span=21, adjust=False).mean().tolist()
             elif indicator == "ema_12":
-                results["ema_12"] = df["Close"].ewm(span=12).mean().tolist()
+                results["ema_12"] = df["Close"].ewm(span=12, adjust=False).mean().tolist()
             elif indicator == "ema_26":
-                results["ema_26"] = df["Close"].ewm(span=26).mean().tolist()
+                results["ema_26"] = df["Close"].ewm(span=26, adjust=False).mean().tolist()
             elif indicator == "rsi":
                 results["rsi"] = self._calculate_rsi(df["Close"]).tolist()
             elif indicator == "macd":
-                ema_12 = df["Close"].ewm(span=12).mean()
-                ema_26 = df["Close"].ewm(span=26).mean()
+                ema_12 = df["Close"].ewm(span=12, adjust=False).mean()
+                ema_26 = df["Close"].ewm(span=26, adjust=False).mean()
                 results["macd"] = (ema_12 - ema_26).tolist()
-                results["macd_signal"] = (ema_12 - ema_26).ewm(span=9).mean().tolist()
+                results["macd_signal"] = (ema_12 - ema_26).ewm(span=9, adjust=False).mean().tolist()
+            elif indicator == "atr_14":
+                results["atr_14"] = self._calculate_atr(df).tolist()
+            elif indicator == "adx_14":
+                results["adx_14"] = self._calculate_adx(df).tolist()
+            elif indicator == "vwap":
+                results["vwap"] = self._calculate_vwap(df).tolist()
+            elif indicator == "avg_volume":
+                results["avg_volume"] = df["Volume"].rolling(window=20).mean().tolist()
+            elif indicator == "body_pct":
+                results["body_pct"] = (
+                    ((df["Close"] - df["Open"]).abs() / df["Open"].replace(0, pd.NA)) * 100
+                ).fillna(0).tolist()
 
         return results
 
@@ -183,6 +202,37 @@ class CalculateIndicatorsTool(Tool):
         loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
         rs = gain / loss
         return 100 - (100 / (1 + rs))
+
+    def _calculate_atr(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
+        prev_close = df["Close"].shift(1)
+        true_range = pd.concat(
+            [
+                df["High"] - df["Low"],
+                (df["High"] - prev_close).abs(),
+                (df["Low"] - prev_close).abs(),
+            ],
+            axis=1,
+        ).max(axis=1)
+        return true_range.rolling(window=period).mean()
+
+    def _calculate_adx(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
+        high_diff = df["High"].diff()
+        low_diff = -df["Low"].diff()
+
+        plus_dm = high_diff.where((high_diff > low_diff) & (high_diff > 0), 0.0)
+        minus_dm = low_diff.where((low_diff > high_diff) & (low_diff > 0), 0.0)
+
+        atr = self._calculate_atr(df, period).replace(0, pd.NA)
+        plus_di = 100 * (plus_dm.rolling(window=period).mean() / atr)
+        minus_di = 100 * (minus_dm.rolling(window=period).mean() / atr)
+        dx = ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, pd.NA)) * 100
+        return dx.rolling(window=period).mean().fillna(0)
+
+    def _calculate_vwap(self, df: pd.DataFrame) -> pd.Series:
+        typical_price = (df["High"] + df["Low"] + df["Close"]) / 3
+        cumulative_value = (typical_price * df["Volume"]).cumsum()
+        cumulative_volume = df["Volume"].cumsum().replace(0, pd.NA)
+        return (cumulative_value / cumulative_volume).ffill().fillna(df["Close"])
 
 
 class AnalyzeSentimentTool(Tool):
@@ -199,8 +249,8 @@ class AnalyzeSentimentTool(Tool):
     async def execute(self, symbol: str) -> dict[str, Any]:
         """Analyze sentiment for a symbol."""
         try:
-            ticker = yf.Ticker(symbol)
-            news = ticker.news
+            provider = get_market_data_provider("A" if _is_a_stock(symbol) else "US")
+            news = provider.get_news(symbol, limit=10)
         except Exception as e:
             return {"symbol": symbol, "sentiment": "neutral", "score": 0.5, "articles": [], "error": str(e)}
 
@@ -226,8 +276,8 @@ class AnalyzeSentimentTool(Tool):
             articles.append(
                 {
                     "title": article.get("title"),
-                    "publisher": article.get("publisher"),
-                    "link": article.get("link"),
+                    "publisher": article.get("source") or article.get("publisher"),
+                    "link": article.get("url") or article.get("link"),
                     "score": score,
                 }
             )

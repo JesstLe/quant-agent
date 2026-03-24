@@ -1,6 +1,7 @@
 """Risk Manager Agent - Risk assessment and position control."""
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from quant_agent.agents.base import AgentRole, BaseAgent
@@ -34,6 +35,9 @@ class RiskManagerAgent(BaseAgent):
         super().__init__(AgentRole.RISK_MANAGER, llm, memory)
         self._positions: dict[str, float] = {}  # symbol -> position value
         self._daily_pnl: float = 0.0
+        self._cooldowns: dict[str, str] = {}
+        self._consecutive_losses: int = 0
+        self._closed_trades: list[dict[str, Any]] = []
 
     @property
     def system_prompt(self) -> str:
@@ -87,6 +91,29 @@ You must be conservative - when in doubt, REJECT the trade."""
         warnings = []
         approved = True
         risk_score = 0.0
+        now = datetime.now(UTC)
+
+        cooldown_until_raw = self._cooldowns.get(signal_obj.symbol)
+        if cooldown_until_raw:
+            try:
+                cooldown_until = datetime.fromisoformat(cooldown_until_raw)
+            except ValueError:
+                cooldown_until = None
+            if cooldown_until and cooldown_until > now:
+                warnings.append(f"{signal_obj.symbol} is on cooldown until {cooldown_until.isoformat()}")
+                approved = False
+                risk_score += 0.4
+
+        daily_loss_limit = capital * 0.02
+        if self._daily_pnl <= -daily_loss_limit:
+            warnings.append("Daily loss limit reached - new trades halted")
+            approved = False
+            risk_score += 0.5
+
+        if self._consecutive_losses >= 3:
+            warnings.append(f"Loss streak active ({self._consecutive_losses}) - new trades throttled")
+            approved = False
+            risk_score += 0.3
 
         # Check confidence
         if signal_obj.confidence < 0.6:
@@ -113,12 +140,23 @@ You must be conservative - when in doubt, REJECT the trade."""
             risk_score += 0.1
 
         # Check portfolio concentration
-        total_exposure = sum(self._positions.values())
+        total_exposure = sum(abs(value) for value in self._positions.values())
+        portfolio_heat = total_exposure / capital if capital > 0 else 0.0
         if total_exposure / capital > 0.8:
             warnings.append("Portfolio highly exposed (>80%)")
             risk_score += 0.2
+        elif portfolio_heat > 0.5:
+            warnings.append("Portfolio heat elevated (>50%)")
+            risk_score += 0.1
 
         # Use LLM for additional analysis
+        kelly_fraction = self._extract_kelly_fraction(signal_obj)
+        size_multiplier = max(0.25, 1 - portfolio_heat)
+        if self._consecutive_losses >= 2:
+            size_multiplier *= 0.5
+        if kelly_fraction > 0:
+            size_multiplier = min(size_multiplier, max(0.25, min(kelly_fraction * 2, 1.0)))
+
         prompt = f"""Assess risk for this trade:
 
 Signal: {signal_obj.symbol} {signal_obj.signal_type.value}
@@ -145,7 +183,7 @@ Provide:
         assessment = RiskAssessment(
             approved=approved and risk_score < 0.7,
             risk_score=risk_score,
-            max_position_size=min(max_position, capital * (1 - risk_score) * 0.1),
+            max_position_size=min(max_position, capital * (1 - risk_score) * 0.1 * size_multiplier),
             suggested_stop_loss=signal_obj.stop_loss,
             warnings=warnings,
             rationale=llm_assessment,
@@ -171,12 +209,18 @@ Provide:
             "suggested_stop_loss": assessment.suggested_stop_loss,
             "warnings": assessment.warnings,
             "rationale": assessment.rationale,
+            "kelly_fraction": round(kelly_fraction, 4),
+            "portfolio_heat": round(portfolio_heat, 4),
+            "size_multiplier": round(size_multiplier, 4),
+            "consecutive_losses": self._consecutive_losses,
+            "trading_paused": self._daily_pnl <= -daily_loss_limit or self._consecutive_losses >= 3,
+            "cooldown_until": cooldown_until_raw,
         }
 
     async def _portfolio_risk(self) -> dict[str, Any]:
         """Calculate portfolio-level risk metrics."""
         capital = self.context.capital
-        total_exposure = sum(self._positions.values())
+        total_exposure = sum(abs(value) for value in self._positions.values())
 
         # Calculate basic metrics
         exposure_ratio = total_exposure / capital if capital > 0 else 0
@@ -211,9 +255,12 @@ Calculate and assess:
             "capital": capital,
             "total_exposure": total_exposure,
             "exposure_ratio": exposure_ratio,
+            "portfolio_heat": exposure_ratio,
             "num_positions": num_positions,
             "daily_pnl": self._daily_pnl,
             "risk_score": risk_score,
+            "consecutive_losses": self._consecutive_losses,
+            "trading_paused": self._daily_pnl <= -(capital * 0.02) or self._consecutive_losses >= 3,
             "analysis": analysis,
         }
 
@@ -234,6 +281,14 @@ Calculate and assess:
             return signal
         return TradingSignal.from_dict(signal)
 
+    @staticmethod
+    def _extract_kelly_fraction(signal: TradingSignal) -> float:
+        raw = signal.metadata.get("kelly_fraction", 0.0)
+        try:
+            return max(0.0, float(raw))
+        except (TypeError, ValueError):
+            return 0.0
+
     async def _check_limits(self) -> dict[str, Any]:
         """Check if any risk limits are breached."""
         capital = self.context.capital
@@ -251,10 +306,10 @@ Calculate and assess:
 
         # Check position concentration
         for symbol, position in self._positions.items():
-            if position / capital > 0.1:
+            if abs(position) / capital > 0.1:
                 breaches.append({
                     "type": "position_concentration",
-                    "message": f"{symbol} position exceeds 10%: {position/capital:.1%}",
+                    "message": f"{symbol} position exceeds 10%: {abs(position)/capital:.1%}",
                     "action": "reduce_position",
                 })
 
@@ -272,3 +327,73 @@ Calculate and assess:
     def update_pnl(self, pnl: float):
         """Update daily P&L."""
         self._daily_pnl += pnl
+
+    def sync_positions(self, positions: dict[str, float]) -> None:
+        """Replace tracked position exposure with the latest runtime view."""
+        self._positions = dict(positions)
+
+    def register_trade_outcome(
+        self,
+        symbol: str,
+        pnl: float,
+        closed_at: datetime | None = None,
+        cooldown_minutes: int = 90,
+    ) -> None:
+        """Record a closed trade and apply loss-streak throttling."""
+        timestamp = closed_at or datetime.now(UTC)
+        self._closed_trades.append(
+            {
+                "symbol": symbol,
+                "pnl": pnl,
+                "closed_at": timestamp.isoformat(),
+            }
+        )
+        self._closed_trades = self._closed_trades[-50:]
+        self.update_pnl(pnl)
+
+        if pnl < 0:
+            self._consecutive_losses += 1
+            self._cooldowns[symbol] = (timestamp + timedelta(minutes=cooldown_minutes)).isoformat()
+        else:
+            self._consecutive_losses = 0
+            self._cooldowns.pop(symbol, None)
+
+    def get_symbol_cooldown(self, symbol: str) -> str | None:
+        """Return cooldown expiry for a symbol if it still applies."""
+        cooldown_until = self._cooldowns.get(symbol)
+        if not cooldown_until:
+            return None
+        try:
+            expires_at = datetime.fromisoformat(cooldown_until)
+        except ValueError:
+            return None
+        if expires_at <= datetime.now(UTC):
+            self._cooldowns.pop(symbol, None)
+            return None
+        return cooldown_until
+
+    def export_state(self) -> dict[str, Any]:
+        """Export risk runtime state for persistence."""
+        return {
+            "positions": dict(self._positions),
+            "daily_pnl": self._daily_pnl,
+            "cooldowns": dict(self._cooldowns),
+            "consecutive_losses": self._consecutive_losses,
+            "closed_trades": list(self._closed_trades),
+        }
+
+    def restore_state(self, state: dict[str, Any]) -> None:
+        """Restore risk runtime state from persistence."""
+        self._positions = {
+            str(symbol): float(value)
+            for symbol, value in dict(state.get("positions", {})).items()
+        }
+        self._daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
+        self._cooldowns = {
+            str(symbol): str(value)
+            for symbol, value in dict(state.get("cooldowns", {})).items()
+        }
+        self._consecutive_losses = int(state.get("consecutive_losses", 0) or 0)
+        self._closed_trades = [
+            trade for trade in list(state.get("closed_trades", [])) if isinstance(trade, dict)
+        ][-50:]

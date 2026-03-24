@@ -3,7 +3,15 @@ import { formatCurrency, formatPercent, formatNumber } from '../../utils/formatt
 import { getDashboardCopy, getRangeTextClasses, getSignedTextClass } from '../../utils/market'
 
 export function MarketsTable() {
-  const { markets, isLoading, marketType } = useApp()
+  const {
+    markets,
+    isLoading,
+    marketType,
+    selectedSymbol,
+    setSelectedSymbol,
+    isWatchlistSymbol,
+    toggleWatchlistSymbol,
+  } = useApp()
   const copy = getDashboardCopy(marketType)
   const rangeClasses = getRangeTextClasses(marketType)
 
@@ -43,6 +51,7 @@ export function MarketsTable() {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-xs text-dark-muted uppercase tracking-wider border-b border-dark-border">
+              <th className="px-3 py-3 text-center">★</th>
               <th className="px-4 py-3 text-left">{copy.symbol}</th>
               <th className="px-4 py-3 text-right">{copy.price}</th>
               <th className="px-4 py-3 text-right">{copy.change}</th>
@@ -52,7 +61,30 @@ export function MarketsTable() {
           </thead>
           <tbody>
             {markets.map((market) => (
-              <tr key={market.symbol} className="border-b border-dark-border hover:bg-dark-hover transition-colors">
+              <tr
+                key={market.symbol}
+                onClick={() => setSelectedSymbol(market.symbol)}
+                className={`border-b border-dark-border transition-colors cursor-pointer ${
+                  selectedSymbol === market.symbol ? 'bg-info/5' : 'hover:bg-dark-hover'
+                }`}
+              >
+                <td className="px-3 py-3 text-center">
+                  <button
+                    type="button"
+                    aria-label={isWatchlistSymbol(market.symbol) ? copy.removeFromWatchlist : copy.addToWatchlist}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void toggleWatchlistSymbol(market.symbol)
+                    }}
+                    className={`text-lg transition-colors ${
+                      isWatchlistSymbol(market.symbol)
+                        ? 'text-warning'
+                        : 'text-dark-muted hover:text-warning'
+                    }`}
+                  >
+                    {isWatchlistSymbol(market.symbol) ? '★' : '☆'}
+                  </button>
+                </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-dark-hover flex items-center justify-center text-xs font-bold text-dark-text">
@@ -73,7 +105,7 @@ export function MarketsTable() {
                       {market.change >= 0 ? '+' : ''}{formatCurrency(market.change, false, marketType)}
                     </div>
                     <div className="text-xs">
-                      {market.changePercent >= 0 ? '+' : ''}{formatPercent(market.changePercent)}
+                      {formatPercent(market.changePercent)}
                     </div>
                   </div>
                 </td>

@@ -27,6 +27,7 @@ export interface Market {
 // ============================================================
 
 export type ChartInterval = '1m' | '5m' | '15m' | '30m' | '60m' | '1d' | '1w' | '1M'
+export type StrategyType = 'fortress' | 'vwap_pullback' | 'orb'
 
 export interface OHLCV {
   time: string | number
@@ -90,6 +91,74 @@ export interface RSIData {
   value: number
 }
 
+export interface KDJData {
+  time: string | number
+  k: number
+  d: number
+  j: number
+}
+
+export interface ChartQuote {
+  symbol: string
+  price: number
+  change: number
+  changePercent: number
+  open: number
+  high: number
+  low: number
+  previousClose: number
+  volume: number
+  amplitude?: number
+  high52w?: number
+  low52w?: number
+  pe?: number
+  pb?: number
+  marketCap?: number
+}
+
+export interface ChartIndicators {
+  overlays: {
+    MA: {
+      ma5: Array<{ time: string | number; value: number }>
+      ma10: Array<{ time: string | number; value: number }>
+      ma20: Array<{ time: string | number; value: number }>
+    }
+    EMA: {
+      ema12: Array<{ time: string | number; value: number }>
+      ema26: Array<{ time: string | number; value: number }>
+    }
+    BOLL: {
+      upper: Array<{ time: string | number; value: number }>
+      middle: Array<{ time: string | number; value: number }>
+      lower: Array<{ time: string | number; value: number }>
+    }
+    VOL: {
+      volumeMa5: Array<{ time: string | number; value: number }>
+      volumeMa10: Array<{ time: string | number; value: number }>
+    }
+  }
+  oscillators: {
+    RSI: RSIData[]
+    MACD: MACDData[]
+    KDJ: KDJData[]
+  }
+}
+
+export interface ChartSnapshot {
+  symbol: string
+  name: string
+  market: 'A' | 'US'
+  interval: ChartInterval
+  lastUpdated: string
+  quote: ChartQuote
+  ohlcv: OHLCV[]
+  intraday: IntradayPoint[]
+  indicators: ChartIndicators
+  depth: MarketDepth
+  ticks: Tick[]
+  depthMode?: 'estimated' | 'real'
+}
+
 // ============================================================
 // News & Alert Types
 // ============================================================
@@ -123,6 +192,7 @@ export interface PriceAlert {
 
 export interface WatchlistItem {
   symbol: string
+  name?: string
   addedAt: Date | string
   notes?: string
   tags?: string[]
@@ -133,6 +203,25 @@ export interface Watchlist {
   name: string
   items: WatchlistItem[]
   createdAt: Date | string
+}
+
+export interface PaperAccount {
+  mode: 'paper'
+  market: 'A' | 'US'
+  strategy: StrategyType
+  capital: number
+  buyingPower: number
+  equity: number
+  dayPnl: number
+  realizedPnl: number
+  unrealizedPnl: number
+  openPositions: number
+  pendingSignals: number
+  executedTrades: number
+  autoTradingEnabled: boolean
+  lastAutoRunAt?: Date | string | null
+  lastResetAt?: Date | string | null
+  tradingPaused?: boolean
 }
 
 // ============================================================
@@ -152,6 +241,15 @@ export interface Position {
   dayChange: number
   dayChangePercent: number
   sector?: string
+  side?: 'LONG' | 'SHORT'
+  protectiveStop?: number
+  targetPrice?: number
+  strategy?: string
+  trailingActive?: boolean
+  partialExitDone?: boolean
+  holdingMinutes?: number
+  timeDecayMinutes?: number
+  kellyFraction?: number
 }
 
 export interface PortfolioMetrics {
@@ -207,6 +305,14 @@ export interface Signal {
   riskScore?: number
   expectedReturn?: number
   quantity?: number
+  strategy?: string
+  warnings?: string[]
+  cooldownUntil?: Date | string | null
+  kellyFraction?: number
+  portfolioHeat?: number
+  maxPositionSize?: number
+  tradingPaused?: boolean
+  metadata?: Record<string, unknown>
 }
 
 // ============================================================
@@ -257,6 +363,7 @@ export interface Trade {
   commission: number
   slippage: number
   signalId?: string
+  reason?: string
 }
 
 // ============================================================
@@ -272,6 +379,9 @@ export interface RiskMetrics {
   concentrationRisk: number
   liquidityRisk: number
   overallRiskScore: number // 1-10
+  portfolioHeat?: number
+  consecutiveLosses?: number
+  tradingPaused?: boolean
 }
 
 export interface RiskAlert {
@@ -296,7 +406,7 @@ export interface ApiResponse<T> {
 }
 
 export interface WebSocketMessage {
-  type: 'portfolio' | 'markets' | 'signals' | 'agents' | 'trades' | 'risk' | 'logs'
+  type: 'portfolio' | 'markets' | 'signals' | 'agents' | 'trades' | 'risk' | 'logs' | 'paperAccount'
   payload: unknown
   timestamp: string
 }
@@ -314,6 +424,7 @@ export interface DashboardState {
   riskMetrics: RiskMetrics | null
   alerts: RiskAlert[]
   logs: AgentLog[]
+  paperAccount: PaperAccount | null
   isLoading: boolean
   error: string | null
   lastUpdate: Date | null

@@ -7,7 +7,8 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
+
+from quant_agent.data.providers import get_market_data_provider
 
 
 @dataclass
@@ -186,11 +187,12 @@ class BacktestEngine:
     def _fetch_data(self) -> pd.DataFrame:
         """Fetch historical price data for all symbols."""
         all_data = []
+        provider = get_market_data_provider("A" if any(symbol.endswith((".SS", ".SZ")) for symbol in self.symbols) else "US")
 
         for symbol in self.symbols:
             try:
-                ticker = yf.Ticker(symbol)
-                df = ticker.history(
+                df = provider.get_history(
+                    symbol,
                     start=self.start_date - timedelta(days=100),
                     end=self.end_date + timedelta(days=1),
                     interval="1d",

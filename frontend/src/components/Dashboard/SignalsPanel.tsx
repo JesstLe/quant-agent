@@ -31,6 +31,11 @@ export function SignalsPanel() {
   const [pendingActionId, setPendingActionId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const copy = getDashboardCopy(marketType)
+  const priceDeltaClass = (signal: { entryPrice: number; targetPrice: number; stopLoss: number; type: SignalType }, kind: 'target' | 'stop') => {
+    const reference = signal.entryPrice || 0
+    const price = kind === 'target' ? signal.targetPrice : signal.stopLoss
+    return getSignedTextClass(price - reference, marketType)
+  }
 
   const handleReview = async (signalId: string, action: 'approve' | 'reject') => {
     setPendingActionId(signalId)
@@ -124,10 +129,10 @@ export function SignalsPanel() {
                       {copy.entry}: <span className="text-dark-text">{formatCurrency(signal.entryPrice, false, marketType)}</span>
                     </span>
                     <span className="text-dark-muted">
-                      {copy.target}: <span className={getSignedTextClass(1, marketType)}>{formatCurrency(signal.targetPrice, false, marketType)}</span>
+                      {copy.target}: <span className={priceDeltaClass(signal, 'target')}>{formatCurrency(signal.targetPrice, false, marketType)}</span>
                     </span>
                     <span className="text-dark-muted">
-                      {copy.stop}: <span className={getSignedTextClass(-1, marketType)}>{formatCurrency(signal.stopLoss, false, marketType)}</span>
+                      {copy.stop}: <span className={priceDeltaClass(signal, 'stop')}>{formatCurrency(signal.stopLoss, false, marketType)}</span>
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -156,6 +161,12 @@ export function SignalsPanel() {
 
                     {/* Details Grid */}
                     <div className="grid grid-cols-3 gap-4 text-xs">
+                      {signal.strategy && (
+                        <div>
+                          <span className="text-dark-muted">{copy.strategy}</span>
+                          <div className="font-medium text-dark-text">{signal.strategy}</div>
+                        </div>
+                      )}
                       {signal.expectedReturn && (
                         <div>
                           <span className="text-dark-muted">{copy.expectedReturn}</span>
@@ -178,7 +189,69 @@ export function SignalsPanel() {
                           <div className="font-medium text-dark-text">{signal.quantity}</div>
                         </div>
                       )}
+                      {typeof signal.kellyFraction === 'number' && signal.kellyFraction > 0 && (
+                        <div>
+                          <span className="text-dark-muted">{copy.kelly}</span>
+                          <div className="font-medium text-dark-text">
+                            {(signal.kellyFraction * 100).toFixed(1)}%
+                          </div>
+                        </div>
+                      )}
+                      {typeof signal.portfolioHeat === 'number' && (
+                        <div>
+                          <span className="text-dark-muted">{copy.heat}</span>
+                          <div className="font-medium text-dark-text">
+                            {(signal.portfolioHeat * 100).toFixed(1)}%
+                          </div>
+                        </div>
+                      )}
+                      {typeof signal.maxPositionSize === 'number' && signal.maxPositionSize > 0 && (
+                        <div>
+                          <span className="text-dark-muted">{copy.maxPositionSize}</span>
+                          <div className="font-medium text-dark-text">
+                            {formatCurrency(signal.maxPositionSize, true, marketType)}
+                          </div>
+                        </div>
+                      )}
                     </div>
+
+                    {(signal.cooldownUntil || signal.tradingPaused || (signal.warnings && signal.warnings.length > 0)) && (
+                      <div className="space-y-2 rounded-lg border border-dark-border bg-dark-hover/40 p-3 text-xs">
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          {signal.cooldownUntil && (
+                            <div>
+                              <span className="text-dark-muted">{copy.cooldown}</span>
+                              <div className="mt-1 font-medium text-warning">
+                                {formatRelativeTime(signal.cooldownUntil, marketType)}
+                              </div>
+                            </div>
+                          )}
+                          {signal.tradingPaused && (
+                            <div>
+                              <span className="text-dark-muted">{copy.tradingPaused}</span>
+                              <div className="mt-1 font-medium text-loss">
+                                {marketType === 'A' ? '是' : 'Yes'}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        {signal.warnings && signal.warnings.length > 0 && (
+                          <div>
+                            <div className="mb-2 text-dark-muted">{copy.warnings}</div>
+                            <div className="flex flex-wrap gap-2">
+                              {signal.warnings.map((warning, index) => (
+                                <span
+                                  key={`${signal.id}-warning-${index}`}
+                                  className="rounded-full border border-warning/30 bg-warning/10 px-2 py-1 text-warning"
+                                >
+                                  {warning}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Footer */}
                     <div className="flex items-center justify-between pt-2 border-t border-dark-border">

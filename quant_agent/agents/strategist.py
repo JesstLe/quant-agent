@@ -48,6 +48,7 @@ class TradingSignal:
             "timeframe": self.timeframe,
             "risk_reward_ratio": self.risk_reward_ratio,
             "position_size_pct": self.position_size_pct,
+            "metadata": self.metadata,
         }
 
     @classmethod
@@ -98,6 +99,7 @@ class StrategistAgent(BaseAgent):
     MIN_CONFIDENCE = 0.6
     MAX_POSITION_PCT = 0.10  # 10% max per position
     DEFAULT_STOP_LOSS_PCT = 0.05  # 5% default stop
+    RULE_RISK_PCT = 0.01  # 1% risk per trade
 
     def __init__(self, llm: LLMProvider, memory: AgentMemory | None = None):
         super().__init__(AgentRole.STRATEGIST, llm, memory)
@@ -213,6 +215,12 @@ Always respond in valid JSON with these fields:
         if current_price == 0:
             return None
 
+        rule_signal = self._generate_rule_based_signal(symbol, analysis, current_price)
+        if self.context.strategy.lower() in {"fortress", "quant_trading_cn", "vwap_pullback", "orb"}:
+            return rule_signal
+        if rule_signal and rule_signal.signal_type != SignalType.HOLD:
+            return rule_signal
+
         # Build comprehensive prompt
         prompt = f"""Analyze the following data for {symbol} and generate a trading signal:
 
@@ -242,6 +250,385 @@ Focus on risk-adjusted returns with minimum 2:1 risk/reward ratio."""
         signal = self._parse_signal_response(symbol, response, current_price)
 
         return signal
+
+    def _generate_rule_based_signal(
+        self,
+        symbol: str,
+        analysis: dict[str, Any],
+        current_price: float,
+    ) -> TradingSignal:
+        strategy_name = self.context.strategy.lower()
+        if strategy_name in {"quant_trading_cn", "fortress"}:
+            return self._generate_fortress_signal(symbol, analysis, current_price)
+        if strategy_name == "vwap_pullback":
+            return self._generate_vwap_pullback_signal(symbol, analysis, current_price)
+        if strategy_name == "orb":
+            return self._generate_orb_signal(symbol, analysis, current_price)
+        return self._generate_fortress_signal(symbol, analysis, current_price)
+
+    def _generate_fortress_signal(
+        self,
+        symbol: str,
+        analysis: dict[str, Any],
+        current_price: float,
+    ) -> TradingSignal:
+        indicators = analysis.get("indicators", {})
+        sentiment = analysis.get("sentiment", {})
+        market_data = analysis.get("market_data", {})
+        data_points = market_data.get("data", [])
+        latest_bar = data_points[-1] if data_points else {}
+
+        ema_9 = self._latest_indicator(indicators, "ema_9")
+        ema_21 = self._latest_indicator(indicators, "ema_21")
+        rsi = self._latest_indicator(indicators, "rsi")
+        adx = self._latest_indicator(indicators, "adx_14")
+        vwap = self._latest_indicator(indicators, "vwap")
+        avg_volume = self._latest_indicator(indicators, "avg_volume")
+        body_pct = self._latest_indicator(indicators, "body_pct")
+        atr = self._latest_indicator(indicators, "atr_14") or (current_price * 0.02)
+        macd = self._latest_indicator(indicators, "macd")
+        macd_signal = self._latest_indicator(indicators, "macd_signal")
+        volume = float(latest_bar.get("Volume", 0) or 0)
+        sentiment_score = float(sentiment.get("score", 0.5) or 0.5)
+
+        bullish_checks = {
+            "ema_trend": ema_9 is not None and ema_21 is not None and ema_9 > ema_21,
+            "vwap": vwap is not None and current_price > vwap,
+            "adx": adx is not None and adx > 25,
+            "rsi": rsi is not None and 45 <= rsi <= 65,
+            "volume": avg_volume is not None and avg_volume > 0 and volume > avg_volume * 1.2,
+            "body": body_pct is not None and body_pct > 0.25,
+            "macd": macd is not None and macd_signal is not None and macd > macd_signal,
+            "sentiment": sentiment_score >= 0.55,
+        }
+        bearish_checks = {
+            "ema_trend": ema_9 is not None and ema_21 is not None and ema_9 < ema_21,
+            "vwap": vwap is not None and current_price < vwap,
+            "adx": adx is not None and adx > 25,
+            "rsi": rsi is not None and 35 <= rsi <= 55,
+            "volume": avg_volume is not None and avg_volume > 0 and volume > avg_volume * 1.2,
+            "body": body_pct is not None and body_pct > 0.25,
+            "macd": macd is not None and macd_signal is not None and macd < macd_signal,
+            "sentiment": sentiment_score <= 0.45,
+        }
+        weights = {
+            "ema_trend": 0.2,
+            "vwap": 0.15,
+            "adx": 0.15,
+            "rsi": 0.1,
+            "volume": 0.1,
+            "body": 0.1,
+            "macd": 0.1,
+            "sentiment": 0.1,
+        }
+
+        bullish_score = sum(weights[key] for key, passed in bullish_checks.items() if passed)
+        bearish_score = sum(weights[key] for key, passed in bearish_checks.items() if passed)
+        bullish_factors = [name for name, passed in bullish_checks.items() if passed]
+        bearish_factors = [name for name, passed in bearish_checks.items() if passed]
+
+        direction = SignalType.HOLD
+        score = 0.0
+        factors: list[str] = []
+        if bullish_score >= 0.55 and len(bullish_factors) >= 4 and bullish_score > bearish_score:
+            direction = SignalType.BUY
+            score = bullish_score
+            factors = bullish_factors
+        elif bearish_score >= 0.55 and len(bearish_factors) >= 4:
+            direction = SignalType.SELL
+            score = bearish_score
+            factors = bearish_factors
+        else:
+            return self._create_hold_signal(
+                symbol,
+                (
+                    f"Fortress filters not met. bullish={bullish_score:.2f} ({', '.join(bullish_factors) or 'none'}), "
+                    f"bearish={bearish_score:.2f} ({', '.join(bearish_factors) or 'none'})"
+                ),
+            )
+
+        stop_distance = max(atr * 1.5, current_price * 0.02)
+        if direction == SignalType.BUY:
+            stop_loss = current_price - stop_distance
+            target_price = current_price + (stop_distance * self.MIN_RISK_REWARD_RATIO)
+        else:
+            stop_loss = current_price + stop_distance
+            target_price = current_price - (stop_distance * self.MIN_RISK_REWARD_RATIO)
+
+        position_size_pct = self._position_size_pct(current_price, stop_loss, score)
+        kelly_fraction = self._kelly_fraction(score, self.MIN_RISK_REWARD_RATIO)
+
+        adx_text = f"{adx:.2f}" if adx is not None else "n/a"
+        rsi_text = f"{rsi:.2f}" if rsi is not None else "n/a"
+        vwap_text = f"{vwap:.2f}" if vwap is not None else "n/a"
+        rationale = (
+            f"Fortress rule signal with score {score:.2f}. "
+            f"Triggered by: {', '.join(factors)}. "
+            f"ADX={adx_text}, RSI={rsi_text}, VWAP={vwap_text}, volume={volume:.0f}."
+        )
+        return self._build_rule_signal(
+            symbol=symbol,
+            direction=direction,
+            current_price=current_price,
+            stop_loss=stop_loss,
+            target_price=target_price,
+            confidence=score,
+            position_size_pct=position_size_pct,
+            rationale=rationale,
+            strategy="fortress",
+            metadata={
+                "score": round(score, 2),
+                "factors": factors,
+                "atr": atr,
+                "adx": adx,
+                "rsi": rsi,
+                "vwap": vwap,
+                "stop_distance": round(stop_distance, 4),
+                "partial_exit_at_r": 1.0,
+                "trail_after_r": 1.0,
+                "time_decay_minutes": 1440,
+                "kelly_fraction": round(kelly_fraction, 4),
+            },
+        )
+
+    def _generate_vwap_pullback_signal(
+        self,
+        symbol: str,
+        analysis: dict[str, Any],
+        current_price: float,
+    ) -> TradingSignal:
+        intraday_data = analysis.get("intraday_market_data", {}).get("data", [])
+        intraday_indicators = analysis.get("intraday_indicators", {})
+        if len(intraday_data) < 20:
+            return self._create_hold_signal(symbol, "VWAP pullback needs more intraday bars")
+
+        latest_bar = intraday_data[-1]
+        ema_9 = self._latest_indicator(intraday_indicators, "ema_9")
+        ema_21 = self._latest_indicator(intraday_indicators, "ema_21")
+        vwap = self._latest_indicator(intraday_indicators, "vwap")
+        atr = self._latest_indicator(intraday_indicators, "atr_14") or (current_price * 0.01)
+        adx = self._latest_indicator(intraday_indicators, "adx_14")
+        rsi = self._latest_indicator(intraday_indicators, "rsi")
+        avg_volume = self._latest_indicator(intraday_indicators, "avg_volume")
+        volume = float(latest_bar.get("Volume", 0) or 0)
+
+        if vwap is None or ema_9 is None or ema_21 is None:
+            return self._create_hold_signal(symbol, "VWAP pullback missing EMA/VWAP data")
+
+        distance_to_vwap_pct = abs(current_price - vwap) / max(vwap, 1) * 100
+        bullish = (
+            ema_9 > ema_21
+            and current_price >= vwap
+            and distance_to_vwap_pct <= 0.8
+            and (adx or 0) >= 18
+            and (rsi or 50) <= 62
+            and volume >= (avg_volume or volume) * 0.9
+        )
+        bearish = (
+            ema_9 < ema_21
+            and current_price <= vwap
+            and distance_to_vwap_pct <= 0.8
+            and (adx or 0) >= 18
+            and (rsi or 50) >= 38
+            and volume >= (avg_volume or volume) * 0.9
+        )
+
+        if not bullish and not bearish:
+            return self._create_hold_signal(
+                symbol,
+                f"VWAP pullback filters not met. price={current_price:.2f}, vwap={vwap:.2f}, dist={distance_to_vwap_pct:.2f}%",
+            )
+
+        direction = SignalType.BUY if bullish else SignalType.SELL
+        stop_distance = max(atr * 1.2, current_price * 0.012)
+        stop_loss, target_price = self._compute_brackets(direction, current_price, stop_distance)
+        confidence = 0.7 + max(0, 0.15 - distance_to_vwap_pct / 10)
+        position_size_pct = self._position_size_pct(current_price, stop_loss, confidence)
+        kelly_fraction = self._kelly_fraction(confidence, self.MIN_RISK_REWARD_RATIO)
+        rationale = (
+            f"VWAP pullback setup. direction={direction.value}, price={current_price:.2f}, "
+            f"vwap={vwap:.2f}, ema9={ema_9:.2f}, ema21={ema_21:.2f}, dist={distance_to_vwap_pct:.2f}%."
+        )
+        return self._build_rule_signal(
+            symbol=symbol,
+            direction=direction,
+            current_price=current_price,
+            stop_loss=stop_loss,
+            target_price=target_price,
+            confidence=confidence,
+            position_size_pct=position_size_pct,
+            rationale=rationale,
+            strategy="vwap_pullback",
+            metadata={
+                "vwap": vwap,
+                "ema_9": ema_9,
+                "ema_21": ema_21,
+                "adx": adx,
+                "rsi": rsi,
+                "distance_to_vwap_pct": round(distance_to_vwap_pct, 2),
+                "atr": atr,
+                "stop_distance": round(stop_distance, 4),
+                "partial_exit_at_r": 1.0,
+                "trail_after_r": 1.0,
+                "time_decay_minutes": 180,
+                "kelly_fraction": round(kelly_fraction, 4),
+            },
+        )
+
+    def _generate_orb_signal(
+        self,
+        symbol: str,
+        analysis: dict[str, Any],
+        current_price: float,
+    ) -> TradingSignal:
+        intraday_data = analysis.get("intraday_market_data", {}).get("data", [])
+        intraday_indicators = analysis.get("intraday_indicators", {})
+        if len(intraday_data) < 12:
+            return self._create_hold_signal(symbol, "ORB needs more opening bars")
+
+        opening_bars = intraday_data[:4]
+        orb_high = max(float(bar.get("High", 0) or 0) for bar in opening_bars)
+        orb_low = min(float(bar.get("Low", 0) or 0) for bar in opening_bars)
+        latest_bar = intraday_data[-1]
+        close_price = float(latest_bar.get("Close", current_price) or current_price)
+        volume = float(latest_bar.get("Volume", 0) or 0)
+        avg_volume = self._latest_indicator(intraday_indicators, "avg_volume")
+        vwap = self._latest_indicator(intraday_indicators, "vwap")
+        adx = self._latest_indicator(intraday_indicators, "adx_14")
+        atr = self._latest_indicator(intraday_indicators, "atr_14") or (current_price * 0.012)
+
+        breakout_long = (
+            close_price > orb_high
+            and (vwap is None or close_price > vwap)
+            and volume >= (avg_volume or volume) * 1.2
+            and (adx or 0) >= 20
+        )
+        breakout_short = (
+            close_price < orb_low
+            and (vwap is None or close_price < vwap)
+            and volume >= (avg_volume or volume) * 1.2
+            and (adx or 0) >= 20
+        )
+
+        if not breakout_long and not breakout_short:
+            return self._create_hold_signal(
+                symbol,
+                f"ORB filters not met. close={close_price:.2f}, orb_high={orb_high:.2f}, orb_low={orb_low:.2f}.",
+            )
+
+        direction = SignalType.BUY if breakout_long else SignalType.SELL
+        stop_anchor = orb_low if breakout_long else orb_high
+        stop_distance = max(abs(close_price - stop_anchor), atr)
+        stop_loss, target_price = self._compute_brackets(direction, close_price, stop_distance)
+        confidence = 0.74
+        position_size_pct = self._position_size_pct(close_price, stop_loss, confidence)
+        kelly_fraction = self._kelly_fraction(confidence, self.MIN_RISK_REWARD_RATIO)
+        rationale = (
+            f"ORB breakout setup. direction={direction.value}, close={close_price:.2f}, "
+            f"orb_high={orb_high:.2f}, orb_low={orb_low:.2f}, vwap={vwap if vwap is not None else 'n/a'}."
+        )
+        return self._build_rule_signal(
+            symbol=symbol,
+            direction=direction,
+            current_price=close_price,
+            stop_loss=stop_loss,
+            target_price=target_price,
+            confidence=confidence,
+            position_size_pct=position_size_pct,
+            rationale=rationale,
+            strategy="orb",
+            metadata={
+                "orb_high": orb_high,
+                "orb_low": orb_low,
+                "vwap": vwap,
+                "adx": adx,
+                "avg_volume": avg_volume,
+                "atr": atr,
+                "stop_distance": round(stop_distance, 4),
+                "partial_exit_at_r": 1.0,
+                "trail_after_r": 1.0,
+                "time_decay_minutes": 180,
+                "kelly_fraction": round(kelly_fraction, 4),
+            },
+        )
+
+    def _compute_brackets(
+        self,
+        direction: SignalType,
+        entry_price: float,
+        stop_distance: float,
+    ) -> tuple[float, float]:
+        if direction == SignalType.BUY:
+            stop_loss = entry_price - stop_distance
+            target_price = entry_price + (stop_distance * self.MIN_RISK_REWARD_RATIO)
+        else:
+            stop_loss = entry_price + stop_distance
+            target_price = entry_price - (stop_distance * self.MIN_RISK_REWARD_RATIO)
+        return stop_loss, target_price
+
+    @staticmethod
+    def _kelly_fraction(confidence: float, risk_reward_ratio: float) -> float:
+        if risk_reward_ratio <= 0:
+            return 0.0
+        win_prob = min(max(confidence, 0.0), 0.99)
+        loss_prob = 1 - win_prob
+        kelly = ((risk_reward_ratio * win_prob) - loss_prob) / risk_reward_ratio
+        return max(0.0, kelly)
+
+    def _position_size_pct(self, entry_price: float, stop_loss: float, confidence: float) -> float:
+        risk_per_share = abs(entry_price - stop_loss)
+        capital = self.context.capital if self._context else 100_000.0
+        max_risk = capital * self.RULE_RISK_PCT
+        shares = max_risk / risk_per_share if risk_per_share > 0 else 0.0
+        position_value = shares * entry_price
+        kelly_fraction = self._kelly_fraction(confidence, self.MIN_RISK_REWARD_RATIO)
+        kelly_cap = min(self.MAX_POSITION_PCT, kelly_fraction * 0.5)
+        if kelly_cap <= 0:
+            kelly_cap = self.MAX_POSITION_PCT * 0.5
+        return min(position_value / capital, kelly_cap)
+
+    def _build_rule_signal(
+        self,
+        *,
+        symbol: str,
+        direction: SignalType,
+        current_price: float,
+        stop_loss: float,
+        target_price: float,
+        confidence: float,
+        position_size_pct: float,
+        rationale: str,
+        strategy: str,
+        metadata: dict[str, Any],
+    ) -> TradingSignal:
+        return TradingSignal(
+            symbol=symbol,
+            signal_type=direction,
+            confidence=min(0.95, max(self.MIN_CONFIDENCE, confidence)),
+            entry_price=current_price,
+            target_price=round(target_price, 2),
+            stop_loss=round(stop_loss, 2),
+            rationale=rationale,
+            timeframe="medium",
+            risk_reward_ratio=self.MIN_RISK_REWARD_RATIO,
+            position_size_pct=position_size_pct,
+            metadata={"strategy": strategy, **metadata},
+        )
+
+
+    @staticmethod
+    def _latest_indicator(indicators: dict[str, Any], key: str) -> float | None:
+        values = indicators.get(key)
+        if not isinstance(values, list) or not values:
+            return None
+        for raw in reversed(values):
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if value == value:
+                return value
+        return None
 
     def _parse_signal_response(
         self, symbol: str, response: str, current_price: float

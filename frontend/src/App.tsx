@@ -1,24 +1,26 @@
 import { AppProvider, useApp } from './hooks/useApp'
-import { PortfolioSummary, PositionsTable, SignalsPanel, AgentsPanel, MarketsTable } from './components/Dashboard'
+import { PortfolioSummary, PaperTradingPanel, WatchlistManagerPanel, PositionsTable, SignalsPanel, AgentsPanel, MarketsTable, MarketWorkbench } from './components/Dashboard'
 import { PortfolioChart, AllocationPieChart, DailyPnlChart } from './components/Dashboard/Charts'
+import { QuantAgentLogo } from './components/Brand/QuantAgentLogo'
 import { localizeAlertMessage } from './utils/market'
+import type { StrategyType } from './types'
 
 export type MarketType = 'A' | 'US'
 
 function Header() {
-  const { refresh, isLoading, marketType, setMarketType, lastUpdate } = useApp()
+  const { refresh, isLoading, marketType, setMarketType, strategyType, setStrategyType, lastUpdate } = useApp()
+  const strategyOptions: Array<{ value: StrategyType; label: string }> = [
+    { value: 'fortress', label: marketType === 'A' ? '堡垒' : 'Fortress' },
+    { value: 'vwap_pullback', label: 'VWAP' },
+    { value: 'orb', label: 'ORB' },
+  ]
 
   return (
     <header className="bg-dark-card border-b border-dark-border">
       <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <svg className="w-7 h-7 text-info" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-              </svg>
-              <h1 className="text-lg font-bold text-dark-text">QuantAgent</h1>
-            </div>
+            <QuantAgentLogo />
             <span className={`px-2 py-0.5 rounded text-xs font-medium ${marketType === 'A' ? 'bg-info/20 text-info' : 'bg-purple-500/20 text-purple-400'}`}>
               {marketType === 'A' ? 'A股' : '美股'}
             </span>
@@ -47,6 +49,22 @@ function Header() {
               >
                 美股
               </button>
+            </div>
+
+            <div className="flex items-center gap-1 bg-dark-hover rounded-lg p-1">
+              {strategyOptions.map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => setStrategyType(option.value)}
+                  className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                    strategyType === option.value
+                      ? 'bg-brand-primary/20 text-brand-primary'
+                      : 'text-dark-muted hover:text-dark-text'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
             </div>
 
             {/* Refresh Button */}
@@ -113,32 +131,45 @@ function MainContent() {
           </div>
         )}
 
-        {/* Top row - Summary and Agents */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2">
+        {/* Top row - Summary, Paper, and Agents */}
+        <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+          <div className="xl:col-span-2">
             <PortfolioSummary />
+          </div>
+          <div>
+            <PaperTradingPanel />
           </div>
           <div>
             <AgentsPanel />
           </div>
         </div>
 
-        {/* Second row - Portfolio Performance */}
+        {/* Second row - Watchlist and Market Workbench */}
+        <div className="grid grid-cols-1 xl:grid-cols-[340px_minmax(0,1fr)] gap-6">
+          <div>
+            <WatchlistManagerPanel />
+          </div>
+          <div>
+            <MarketWorkbench />
+          </div>
+        </div>
+
+        {/* Third row - Portfolio Performance */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <PortfolioChart />
           <AllocationPieChart />
         </div>
 
-        {/* Third row - Positions */}
+        {/* Fourth row - Positions */}
         <PositionsTable />
 
-        {/* Fourth row - Daily P&L and Signals */}
+        {/* Fifth row - Daily P&L and Signals */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <DailyPnlChart />
           <SignalsPanel />
         </div>
 
-        {/* Fifth row - Markets */}
+        {/* Sixth row - Markets */}
         <MarketsTable />
       </div>
     </main>

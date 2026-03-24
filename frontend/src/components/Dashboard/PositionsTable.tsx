@@ -109,6 +109,28 @@ export function PositionsTable() {
                     <div>
                       <div className="font-medium text-dark-text">{position.symbol}</div>
                       <div className="text-xs text-dark-muted">{position.name}</div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {position.side && (
+                          <span className="rounded-full border border-dark-border px-2 py-0.5 text-[10px] text-dark-muted">
+                            {position.side === 'SHORT' ? copy.shortSide : copy.longSide}
+                          </span>
+                        )}
+                        {position.strategy && (
+                          <span className="rounded-full border border-dark-border px-2 py-0.5 text-[10px] text-dark-muted">
+                            {position.strategy}
+                          </span>
+                        )}
+                        {position.trailingActive && (
+                          <span className="rounded-full border border-info/30 bg-info/10 px-2 py-0.5 text-[10px] text-info">
+                            {copy.trailing}
+                          </span>
+                        )}
+                        {position.partialExitDone && (
+                          <span className="rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[10px] text-warning">
+                            {copy.partialExit}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </td>
@@ -120,6 +142,20 @@ export function PositionsTable() {
                 </td>
                 <td className="px-4 py-3 text-right text-dark-text font-medium">
                   {formatCurrency(position.currentPrice, false, marketType)}
+                  {(position.protectiveStop || position.targetPrice) && (
+                    <div className="mt-1 space-y-0.5 text-[10px] font-normal text-dark-muted">
+                      {position.protectiveStop ? (
+                        <div>
+                          {copy.protectiveStop}: {formatCurrency(position.protectiveStop, false, marketType)}
+                        </div>
+                      ) : null}
+                      {position.targetPrice ? (
+                        <div>
+                          {copy.target}: {formatCurrency(position.targetPrice, false, marketType)}
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className={getSignedTextClass(position.pnl, marketType)}>
@@ -127,13 +163,13 @@ export function PositionsTable() {
                       {position.pnl >= 0 ? '+' : ''}{formatCurrency(position.pnl, false, marketType)}
                     </div>
                     <div className="text-xs">
-                      ({position.pnlPercent >= 0 ? '+' : ''}{formatPercent(position.pnlPercent)})
+                      ({formatPercent(position.pnlPercent)})
                     </div>
                   </div>
                 </td>
                 <td className="px-4 py-3 text-right">
                   <span className={getSignedTextClass(position.dayChange, marketType)}>
-                    {position.dayChange >= 0 ? '+' : ''}{formatPercent(position.dayChangePercent)}
+                    {formatPercent(position.dayChangePercent)}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-right text-dark-text font-medium">
@@ -151,6 +187,25 @@ export function PositionsTable() {
                       {position.weight.toFixed(1)}%
                     </span>
                   </div>
+                  {(typeof position.holdingMinutes === 'number' || typeof position.kellyFraction === 'number') && (
+                    <div className="mt-1 space-y-0.5 text-[10px] text-dark-muted">
+                      {typeof position.holdingMinutes === 'number' ? (
+                        <div>
+                          {copy.holdingTime}: {position.holdingMinutes}m
+                        </div>
+                      ) : null}
+                      {typeof position.timeDecayMinutes === 'number' && position.timeDecayMinutes > 0 ? (
+                        <div>
+                          {copy.timeDecay}: {position.timeDecayMinutes}m
+                        </div>
+                      ) : null}
+                      {typeof position.kellyFraction === 'number' && position.kellyFraction > 0 ? (
+                        <div>
+                          {copy.kelly}: {(position.kellyFraction * 100).toFixed(1)}%
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}

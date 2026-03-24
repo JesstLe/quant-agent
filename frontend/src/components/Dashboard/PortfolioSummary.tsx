@@ -1,125 +1,112 @@
 import { useApp } from '../../hooks/useApp'
-import { formatCurrency, formatPercent, formatRelativeTime } from '../../utils/formatters'
-import { getDashboardCopy, getSignedTextClass } from '../../utils/market'
+import { formatCurrency, formatRelativeTime } from '../../utils/formatters'
+import { getDashboardCopy } from '../../utils/market'
+
+function StatusCard({
+  label,
+  value,
+  accent = 'text-dark-text',
+  secondary,
+}: {
+  label: string
+  value: string
+  accent?: string
+  secondary?: string
+}) {
+  return (
+    <div className="rounded-lg border border-dark-border bg-dark-hover/70 p-4">
+      <div className="text-[11px] uppercase tracking-[0.16em] text-dark-muted">{label}</div>
+      <div className={`mt-2 text-xl font-semibold ${accent}`}>{value}</div>
+      {secondary && <div className="mt-1 text-xs text-dark-muted">{secondary}</div>}
+    </div>
+  )
+}
 
 export function PortfolioSummary() {
-  const { portfolio, riskMetrics, lastUpdate, isLoading, marketType } = useApp()
+  const { portfolio, lastUpdate, isLoading, marketType, strategyType, selectedSymbol } = useApp()
   const copy = getDashboardCopy(marketType)
 
   if (isLoading) {
     return (
       <div className="bg-dark-card border border-dark-border rounded-lg p-6 animate-pulse">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-20 bg-dark-hover rounded"></div>
+            <div key={i} className="h-24 bg-dark-hover rounded-lg" />
           ))}
         </div>
       </div>
     )
   }
 
-  if (!portfolio) {
-    return (
-      <div className="bg-dark-card border border-dark-border rounded-lg p-6 text-center text-dark-muted">
-        {copy.noPortfolio}
-      </div>
-    )
-  }
-
-  const metrics = [
-    {
-      label: copy.totalValue,
-      value: formatCurrency(portfolio.totalValue, true, marketType),
-      subValue: formatCurrency(portfolio.dayPnl, false, marketType),
-      subLabel: copy.dayPnl,
-      signalValue: portfolio.dayPnl,
-    },
-    {
-      label: copy.dayReturn,
-      value: formatPercent(portfolio.dayPnlPercent),
-      subValue: formatPercent(portfolio.weekPnlPercent),
-      subLabel: copy.week,
-      signalValue: portfolio.dayPnlPercent,
-    },
-    {
-      label: copy.sharpeRatio,
-      value: portfolio.sharpeRatio.toFixed(2),
-      subValue: `${portfolio.winRate.toFixed(1)}%`,
-      subLabel: copy.winRate,
-      signalValue: portfolio.sharpeRatio,
-      isPositive: portfolio.sharpeRatio >= 1,
-    },
-    {
-      label: copy.maxDrawdown,
-      value: formatPercent(portfolio.maxDrawdown),
-      subValue: riskMetrics ? `${copy.riskScore}: ${riskMetrics.overallRiskScore}/10` : `${copy.riskScore}: --`,
-      subLabel: copy.riskScore,
-      signalValue: portfolio.maxDrawdown,
-      isPositive: portfolio.maxDrawdown >= -5,
-      invertColors: true,
-    },
-  ]
+  const totalValue = portfolio?.totalValue ?? 0
+  const cashBalance = portfolio?.cashBalance ?? 0
+  const investedValue = portfolio?.investedValue ?? 0
+  const positionsCount = portfolio?.positions.length ?? 0
+  const marketLabel = marketType === 'A' ? 'A股' : 'US Equities'
+  const dataSourceLabel = marketType === 'A' ? 'Yahoo Finance + Google 新闻' : 'Yahoo Finance + Google News'
+  const executionLabel = copy.paperTrading
+  const strategyLabel = strategyType === 'fortress'
+    ? (marketType === 'A' ? '堡垒策略' : 'Fortress')
+    : strategyType === 'vwap_pullback'
+      ? 'VWAP Pullback'
+      : 'ORB'
+  const refreshLabel = lastUpdate ? formatRelativeTime(lastUpdate, marketType) : '--'
 
   return (
     <div className="bg-dark-card border border-dark-border rounded-lg">
       <div className="px-4 py-3 border-b border-dark-border flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-dark-text">{copy.portfolioOverview}</h2>
-        {lastUpdate && (
-          <span className="text-xs text-dark-muted">
-            {copy.updated} {formatRelativeTime(lastUpdate, marketType)}
-          </span>
-        )}
+        <div>
+          <h2 className="text-sm font-semibold text-dark-text">{copy.terminalStatus}</h2>
+          <div className="mt-1 text-xs text-dark-muted">{copy.accountStatus}</div>
+        </div>
+        <div className="flex items-center gap-2 rounded-full border border-dark-border bg-dark-hover px-3 py-1">
+          <span className="h-2 w-2 rounded-full bg-profit animate-pulse" />
+          <span className="text-xs text-dark-muted">{copy.liveConnection}</span>
+        </div>
       </div>
+
       <div className="p-4">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {metrics.map((metric) => (
-            <div key={metric.label} className="bg-dark-hover rounded-lg p-4">
-              <div className="text-xs text-dark-muted uppercase tracking-wider mb-2">
-                {metric.label}
-              </div>
-              <div className={`text-2xl font-bold ${metric.invertColors
-                ? (metric.isPositive ? 'text-profit' : 'text-loss')
-                : getSignedTextClass(metric.signalValue ?? 0, marketType)}`}>
-                {metric.value}
-              </div>
-              <div className="flex items-center justify-between mt-2 text-xs">
-                <span className="text-dark-muted">{metric.subLabel}:</span>
-                <span className={metric.invertColors
-                  ? (metric.isPositive ? 'text-profit' : 'text-loss')
-                  : getSignedTextClass(parseFloat(metric.subValue.replace(/[^0-9.-]/g, '')) || 0, marketType)}>
-                  {metric.subValue}
-                </span>
-              </div>
-            </div>
-          ))}
+        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+          <StatusCard
+            label={copy.currentMarket}
+            value={marketLabel}
+            accent={marketType === 'A' ? 'text-info' : 'text-purple-400'}
+          />
+          <StatusCard
+            label={copy.currentSymbol}
+            value={selectedSymbol ?? '--'}
+            secondary={copy.selectedSymbol}
+          />
+          <StatusCard
+            label={copy.dataSource}
+            value={dataSourceLabel}
+          />
+          <StatusCard
+            label={copy.executionMode}
+            value={executionLabel}
+            secondary={`${copy.strategyLabel}: ${strategyLabel}`}
+          />
         </div>
 
-        {/* Position Summary */}
-        <div className="mt-4 pt-4 border-t border-dark-border">
-          <div className="flex items-center justify-between text-sm">
-            <div className="flex items-center gap-6">
-              <div>
-                <span className="text-dark-muted">{copy.invested}: </span>
-                <span className="text-dark-text font-medium">
-                  {formatCurrency(portfolio.investedValue, true, marketType)}
-                </span>
-              </div>
-              <div>
-                <span className="text-dark-muted">{copy.cash}: </span>
-                <span className="text-dark-text font-medium">
-                  {formatCurrency(portfolio.cashBalance, true, marketType)}
-                </span>
-              </div>
-              <div>
-                <span className="text-dark-muted">{copy.positions}: </span>
-                <span className="text-dark-text font-medium">{portfolio.positions.length}</span>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-profit animate-pulse"></span>
-              <span className="text-xs text-dark-muted">{copy.live}</span>
-            </div>
-          </div>
+        <div className="mt-4 grid grid-cols-2 gap-4 xl:grid-cols-4">
+          <StatusCard
+            label={copy.totalValue}
+            value={formatCurrency(totalValue, true, marketType)}
+            accent="text-profit"
+          />
+          <StatusCard
+            label={copy.cash}
+            value={formatCurrency(cashBalance, true, marketType)}
+          />
+          <StatusCard
+            label={copy.invested}
+            value={formatCurrency(investedValue, true, marketType)}
+          />
+          <StatusCard
+            label={copy.positions}
+            value={String(positionsCount)}
+            secondary={`${copy.lastRefresh}: ${refreshLabel}`}
+          />
         </div>
       </div>
     </div>
