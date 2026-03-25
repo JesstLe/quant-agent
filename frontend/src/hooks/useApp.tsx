@@ -331,7 +331,7 @@ export function AppProvider({ children, initialMarketType = 'US' }: AppProviderP
       if (!removing) {
         setSelectedSymbolState(symbol)
       } else if (selectedSymbol === symbol) {
-        setSelectedSymbolState(nextWatchlist[0]?.symbol ?? symbol)
+        setSelectedSymbolState(nextWatchlist[0]?.symbol ?? null)
       }
     } catch (err) {
       console.error('Failed to update watchlist:', err)

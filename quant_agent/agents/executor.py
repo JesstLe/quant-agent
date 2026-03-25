@@ -330,6 +330,14 @@ Always report:
             else:
                 return {"error": "Cannot determine quantity without entry price"}
 
+        is_manual_order = bool(signal_obj.metadata.get("manual")) or str(signal_obj.metadata.get("source", "")).lower() == "manual-ticket"
+        try:
+            quantity = self._normalize_order_quantity(float(quantity), manual=is_manual_order)
+        except ValueError as exc:
+            return {"error": str(exc)}
+        if quantity <= 0:
+            return {"error": "Order quantity is too small for the current market rules"}
+
         # Create order
         order_id = self._generate_order_id()
         order = Order(
@@ -857,6 +865,27 @@ Provide:
     def _generate_order_id(self) -> str:
         """Generate a unique order ID."""
         return f"ORD-{uuid.uuid4().hex[:8].upper()}"
+
+    def _normalize_order_quantity(self, quantity: float, *, manual: bool) -> float:
+        if quantity <= 0:
+            return 0.0
+
+        market = str((self._context.metadata if self._context else {}).get("market", "")).upper()
+        if market != "A":
+            return float(round(quantity, 4))
+
+        whole_shares = int(quantity)
+        if manual and abs(quantity - whole_shares) > 1e-6:
+            raise ValueError("A-share quantity must be an integer number of shares")
+
+        normalized = (whole_shares // 100) * 100
+        if normalized <= 0:
+            if manual:
+                raise ValueError("A-share quantity must be at least 100 shares")
+            return 0.0
+        if manual and normalized != whole_shares:
+            raise ValueError("A-share quantity must be a multiple of 100 shares")
+        return float(normalized)
 
     def _rate_slippage(self, slippage_bps: float) -> str:
         """Rate slippage quality."""

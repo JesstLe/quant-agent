@@ -55,6 +55,7 @@ class PositionRecord:
     symbol: str
     quantity: float
     avg_price: float
+    signed_market_value: float
     market_value: float
     pnl: float
     pnl_percent: float
@@ -76,7 +77,9 @@ class DashboardRuntimeService:
         refresh_interval_seconds: int = 120,
         state_store: RuntimeStateStore | None = None,
     ) -> None:
-        self.symbols = symbols or ["AAPL", "MSFT", "GOOGL", "NVDA", "AMZN", "TSLA"]
+        self.symbols = [str(symbol).strip().upper() for symbol in (symbols or ["AAPL", "MSFT", "GOOGL", "NVDA", "AMZN", "TSLA"])]
+        self._base_symbols = list(self.symbols)
+        self._dynamic_symbols: list[str] = []
         self.strategy = strategy.strip().lower() or "fortress"
         self.capital = capital
         self.refresh_interval_seconds = refresh_interval_seconds
@@ -192,6 +195,7 @@ class DashboardRuntimeService:
         self._watchlist = [
             item for item in self._watchlist if str(item.get("symbol", "")).upper() != normalized
         ]
+        self._prune_symbol_from_universe(normalized)
         self._persist_state()
         return list(self._watchlist)
 
@@ -254,6 +258,7 @@ class DashboardRuntimeService:
             )
             self._last_refresh = None
             await self._refresh_snapshot(allow_auto_execute=False)
+            self._prune_inactive_dynamic_symbols()
             self._persist_state()
             return dict(self._snapshot.get("paperAccount", {}))
 
@@ -282,7 +287,8 @@ class DashboardRuntimeService:
             normalized_side = side.strip().upper()
             if normalized_side not in {"BUY", "SELL"}:
                 raise ValueError("side must be BUY or SELL")
-            if quantity <= 0:
+            validated_quantity = self._normalize_order_quantity(quantity, allow_rounding=False)
+            if validated_quantity <= 0:
                 raise ValueError("quantity must be greater than 0")
             if limit_price <= 0:
                 raise ValueError("price must be greater than 0")
@@ -306,7 +312,7 @@ class DashboardRuntimeService:
                 "rationale": "Manual paper order from terminal ticket",
                 "timeframe": "manual",
                 "risk_reward_ratio": 1.0,
-                "position_size_pct": min((float(quantity) * float(limit_price)) / max(self.capital, 1.0), 1.0),
+                "position_size_pct": min((float(validated_quantity) * float(limit_price)) / max(self.capital, 1.0), 1.0),
                 "metadata": {
                     "strategy": "manual",
                     "source": "manual-ticket",
@@ -316,7 +322,7 @@ class DashboardRuntimeService:
             execution = await self._executor.execute(
                 "place_order",
                 signal=signal_payload,
-                quantity=float(quantity),
+                quantity=float(validated_quantity),
                 order_type="limit",
             )
             if not execution.get("success"):
@@ -330,7 +336,7 @@ class DashboardRuntimeService:
                 details={
                     "symbol": normalized_symbol,
                     "side": normalized_side,
-                    "quantity": float(quantity),
+                    "quantity": float(validated_quantity),
                     "price": float(limit_price),
                     "execution": execution,
                 },
@@ -392,6 +398,7 @@ class DashboardRuntimeService:
                 )
 
             await self._rebuild_snapshot_views()
+            self._prune_inactive_dynamic_symbols()
             self._persist_state()
             return {
                 "success": True,
@@ -542,6 +549,11 @@ class DashboardRuntimeService:
                 current_price=entry_price,
             )
             status = "PENDING" if assessment.get("approved") else "REJECTED"
+            suggested_quantity = self._suggested_quantity(normalized_signal)
+            warnings = list(assessment.get("warnings", []))
+            if signal_type in {"BUY", "SELL"} and self.market == "A" and suggested_quantity <= 0:
+                status = "REJECTED"
+                warnings.append("Position size is below one A-share lot (100 shares)")
             signal_id = self._signal_id(normalized_signal)
             execution_details = None
 
@@ -565,9 +577,9 @@ class DashboardRuntimeService:
                 "expectedReturn": self._expected_return_pct(
                     normalized_signal
                 ),
-                "quantity": self._suggested_quantity(normalized_signal),
+                "quantity": suggested_quantity,
                 "strategy": str(signal.get("metadata", {}).get("strategy", self.strategy)),
-                "warnings": list(assessment.get("warnings", [])),
+                "warnings": warnings,
                 "cooldownUntil": assessment.get("cooldown_until"),
                 "kellyFraction": round(float(assessment.get("kelly_fraction", signal.get("metadata", {}).get("kelly_fraction", 0.0)) or 0.0), 4),
                 "portfolioHeat": round(float(assessment.get("portfolio_heat", 0.0) or 0.0), 4),
@@ -1096,6 +1108,7 @@ class DashboardRuntimeService:
             current_price = float(market["price"])
             exposure_qty = abs(quantity)
             market_value = exposure_qty * current_price
+            signed_market_value = quantity * current_price
             avg_price = payload["avg_price"] or current_price
             pnl = (
                 quantity * (current_price - avg_price)
@@ -1108,6 +1121,7 @@ class DashboardRuntimeService:
                     symbol=symbol,
                     quantity=quantity,
                     avg_price=avg_price,
+                    signed_market_value=signed_market_value,
                     market_value=market_value,
                     pnl=pnl,
                     pnl_percent=(
@@ -1131,7 +1145,8 @@ class DashboardRuntimeService:
         historical_data: list[dict[str, Any]],
     ) -> dict[str, Any]:
         invested_value = sum(position.market_value for position in positions)
-        total_value = invested_value + cash_balance
+        net_market_value = sum(position.signed_market_value for position in positions)
+        total_value = cash_balance + net_market_value
         day_pnl = sum(position.day_change for position in positions)
         total_pnl = sum(position.pnl for position in positions)
         historical_values = [point["value"] for point in historical_data] or [total_value]
@@ -1141,14 +1156,14 @@ class DashboardRuntimeService:
 
         position_payload = []
         for position in positions:
-            weight = (position.market_value / total_value) * 100 if total_value else 0.0
+            weight = (position.market_value / invested_value) * 100 if invested_value else 0.0
             position_payload.append(
                 {
                     "symbol": position.symbol,
                     "name": position.name,
                     "quantity": round(position.quantity, 4),
                     "avgPrice": round(position.avg_price, 2),
-                    "currentPrice": round(position.market_value / abs(position.quantity), 2) if position.quantity else 0.0,
+                    "currentPrice": round(abs(position.signed_market_value / position.quantity), 2) if position.quantity else 0.0,
                     "pnl": round(position.pnl, 2),
                     "pnlPercent": round(position.pnl_percent, 2),
                     "marketValue": round(position.market_value, 2),
@@ -1490,7 +1505,10 @@ class DashboardRuntimeService:
         position_size_pct = float(signal.get("position_size_pct") or 0)
         if not entry or not position_size_pct:
             return 0.0
-        return round((self.capital * position_size_pct) / entry, 4)
+        raw_quantity = (self.capital * position_size_pct) / entry
+        if self.market == "A":
+            return float(self._normalize_order_quantity(raw_quantity, allow_rounding=True))
+        return round(raw_quantity, 4)
 
     def _append_log(
         self,
@@ -1731,7 +1749,11 @@ class DashboardRuntimeService:
 
     def _tracked_symbols(self) -> list[str]:
         tracked: list[str] = []
-        for symbol in self.symbols:
+        for symbol in self._base_symbols:
+            normalized = str(symbol).strip().upper()
+            if normalized and normalized not in tracked:
+                tracked.append(normalized)
+        for symbol in self._dynamic_symbols:
             normalized = str(symbol).strip().upper()
             if normalized and normalized not in tracked:
                 tracked.append(normalized)
@@ -1745,15 +1767,57 @@ class DashboardRuntimeService:
             normalized = str(position.symbol).strip().upper()
             if normalized and normalized not in tracked:
                 tracked.append(normalized)
-        return tracked or list(self.symbols)
+        return tracked or list(self._base_symbols)
 
     def _ensure_symbol_in_universe(self, symbol: str) -> None:
         normalized = symbol.strip().upper()
         if not normalized:
             return
-        if normalized not in self.symbols:
-            self.symbols.append(normalized)
+        if normalized not in self._base_symbols and normalized not in self._dynamic_symbols:
+            self._dynamic_symbols.append(normalized)
         self._set_context()
+
+    def _prune_symbol_from_universe(self, symbol: str) -> None:
+        normalized = symbol.strip().upper()
+        if not normalized or normalized in self._base_symbols:
+            return
+        if any(str(item.get("symbol", "")).upper() == normalized for item in self._watchlist):
+            return
+        if any(position.symbol.strip().upper() == normalized and position.status == "open" for position in self._executor.get_managed_positions()):
+            return
+        self._dynamic_symbols = [
+            candidate for candidate in self._dynamic_symbols
+            if candidate.strip().upper() != normalized
+        ]
+        markets = self._snapshot.get("markets")
+        if isinstance(markets, list):
+            self._snapshot["markets"] = [
+                market for market in markets
+                if str(market.get("symbol", "")).strip().upper() != normalized
+            ]
+        self._set_context()
+
+    def _prune_inactive_dynamic_symbols(self) -> None:
+        for symbol in list(self._dynamic_symbols):
+            self._prune_symbol_from_universe(symbol)
+
+    def _normalize_order_quantity(self, quantity: float, *, allow_rounding: bool) -> float:
+        if quantity <= 0:
+            return 0.0
+        if self.market != "A":
+            return float(round(quantity, 4))
+
+        whole_shares = int(quantity)
+        if not allow_rounding and abs(quantity - whole_shares) > 1e-6:
+            raise ValueError("A-share quantity must be an integer number of shares")
+        normalized = (whole_shares // 100) * 100
+        if normalized <= 0:
+            if allow_rounding:
+                return 0.0
+            raise ValueError("A-share quantity must be at least 100 shares")
+        if not allow_rounding and normalized != whole_shares:
+            raise ValueError("A-share quantity must be a multiple of 100 shares")
+        return float(normalized)
 
     def _ensure_market_entry(self, symbol: str) -> None:
         normalized = symbol.strip().upper()
@@ -1918,3 +1982,4 @@ class DashboardRuntimeService:
                 self._last_refresh = datetime.fromisoformat(last_refresh)
             except ValueError:
                 self._last_refresh = None
+        self._set_context()
