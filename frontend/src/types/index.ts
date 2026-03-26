@@ -81,9 +81,9 @@ export interface IndicatorConfig {
 
 export interface MACDData {
   time: string | number
-  macd: number
-  signal: number
-  histogram: number
+  macd: number | null
+  signal: number | null
+  histogram: number | null
 }
 
 export interface RSIData {

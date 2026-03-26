@@ -73,6 +73,8 @@ export function calculateRSI(data: number[], period: number = 14): (number | nul
   const result: (number | null)[] = []
   const gains: number[] = []
   const losses: number[] = []
+  let avgGain: number | null = null
+  let avgLoss: number | null = null
 
   for (let i = 1; i < data.length; i++) {
     const change = data[i] - data[i - 1]
@@ -84,15 +86,14 @@ export function calculateRSI(data: number[], period: number = 14): (number | nul
     if (i < period) {
       result.push(null)
     } else if (i === period) {
-      const avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period
-      const avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) / period
-      const rs = avgLoss === 0 ? 100 : avgGain / avgLoss
+      avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period
+      avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) / period
+      const rs = avgLoss === 0 ? Number.POSITIVE_INFINITY : avgGain / avgLoss
       result.push(100 - 100 / (1 + rs))
     } else {
-      const prevRsi = result[i - 1] as number
-      const prevAvgGain = (prevRsi * (period - 1) + gains[i - 1]) / period
-      const prevAvgLoss = (prevRsi * (period - 1) + losses[i - 1]) / period
-      const rs = prevAvgLoss === 0 ? 100 : prevAvgGain / prevAvgLoss
+      avgGain = ((avgGain ?? 0) * (period - 1) + gains[i - 1]) / period
+      avgLoss = ((avgLoss ?? 0) * (period - 1) + losses[i - 1]) / period
+      const rs = avgLoss === 0 ? Number.POSITIVE_INFINITY : avgGain / avgLoss
       result.push(100 - 100 / (1 + rs))
     }
   }
@@ -112,16 +113,42 @@ export function calculateMACD(
   const fastEMA = calculateEMA(data, fastPeriod)
   const slowEMA = calculateEMA(data, slowPeriod)
   
-  const macdLine: number[] = []
+  const macdLine: (number | null)[] = []
   for (let i = 0; i < data.length; i++) {
     if (fastEMA[i] === null || slowEMA[i] === null) {
-      macdLine.push(0)
+      macdLine.push(null)
     } else {
       macdLine.push(fastEMA[i] as number - (slowEMA[i] as number))
     }
   }
 
-  const signalLine = calculateEMA(macdLine, signalPeriod)
+  const signalLine: (number | null)[] = []
+  const validMacd: number[] = []
+
+  for (let i = 0; i < macdLine.length; i++) {
+    const value = macdLine[i]
+    if (value === null) {
+      signalLine.push(null)
+      continue
+    }
+
+    validMacd.push(value)
+    if (validMacd.length < signalPeriod) {
+      signalLine.push(null)
+      continue
+    }
+
+    if (validMacd.length === signalPeriod) {
+      const seed = validMacd.reduce((sum, item) => sum + item, 0) / signalPeriod
+      signalLine.push(seed)
+      continue
+    }
+
+    const previousSignal = signalLine[i - 1]
+    const multiplier = 2 / (signalPeriod + 1)
+    const nextSignal = ((value - (previousSignal as number)) * multiplier) + (previousSignal as number)
+    signalLine.push(nextSignal)
+  }
   
   const result: MACDData[] = []
   for (let i = 0; i < data.length; i++) {
@@ -130,8 +157,8 @@ export function calculateMACD(
     result.push({
       time: i,
       macd,
-      signal: signal || 0,
-      histogram: macd - (signal || 0),
+      signal,
+      histogram: macd !== null && signal !== null ? macd - signal : null,
     })
   }
 

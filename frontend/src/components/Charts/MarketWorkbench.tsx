@@ -287,11 +287,13 @@ function buildIntradayVolume(points: IntradayPoint[], marketType: 'A' | 'US') {
 }
 
 function buildMacdHistogram(data: MACDData[], marketType: 'A' | 'US') {
-  return data.map((point) => ({
-    time: toChartTime(point.time),
-    value: point.histogram,
-    color: getSignedFillColor(point.histogram, marketType),
-  }))
+  return data
+    .filter((point) => point.histogram !== null)
+    .map((point) => ({
+      time: toChartTime(point.time),
+      value: point.histogram as number,
+      color: getSignedFillColor(point.histogram as number, marketType),
+    }))
 }
 
 function applyOverlaySeries(
@@ -389,20 +391,28 @@ function renderOscillator(
       lineWidth: 2,
       priceLineVisible: false,
     })
-    macdLine.setData(payload.indicators.oscillators.MACD.map((point) => ({
-      time: toChartTime(point.time),
-      value: point.macd,
-    })))
+    macdLine.setData(
+      payload.indicators.oscillators.MACD
+        .filter((point) => point.macd !== null)
+        .map((point) => ({
+          time: toChartTime(point.time),
+          value: point.macd as number,
+        })),
+    )
 
     const signalLine = chart.addSeries(LineSeries, {
       color: ACCENT,
       lineWidth: 2,
       priceLineVisible: false,
     })
-    signalLine.setData(payload.indicators.oscillators.MACD.map((point) => ({
-      time: toChartTime(point.time),
-      value: point.signal,
-    })))
+    signalLine.setData(
+      payload.indicators.oscillators.MACD
+        .filter((point) => point.signal !== null)
+        .map((point) => ({
+          time: toChartTime(point.time),
+          value: point.signal as number,
+        })),
+    )
     return
   }
 
